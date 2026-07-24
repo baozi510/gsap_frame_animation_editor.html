@@ -12,7 +12,6 @@ import { TimelineEngine } from './TimelineEngine'
 
 export interface ExportOptions {
   project: Project
-  scene: Scene
   onProgress: (progress: ExportProgress) => void
 }
 
@@ -23,21 +22,27 @@ export class ExportEngine {
     return Boolean(codec)
   }
 
-  async exportCurrentScene({ project, scene, onProgress }: ExportOptions) {
+  async exportProject({ project, onProgress }: ExportOptions) {
     const exportProject = clone(project)
-    exportProject.scenes = [clone(scene)]
-    exportProject.currentSceneId = exportProject.scenes[0].id
-    const exportScene = exportProject.scenes[0]
+    const scenes = exportProject.scenes.map((scene) => clone(scene))
+    if (!scenes.length) throw new Error('项目中没有可导出的场景。')
     const fps = exportProject.fps
-    const totalFrames = Math.ceil(exportScene.duration * fps)
+    const totalFrames = scenes.reduce((total, scene) => total + Math.ceil(scene.duration * fps), 0)
+    const totalDuration = scenes.reduce((total, scene) => total + scene.duration, 0)
 
-    onProgress({ active: true, percent: 0, title: '初始化导出器', detail: '创建隐藏的 PixiJS 导出画布…' })
+    onProgress({
+      active: true,
+      percent: 0,
+      title: '初始化完整视频',
+      detail: `准备串联 ${scenes.length} 个场景，总时长 ${totalDuration.toFixed(2)} 秒…`,
+    })
 
     const host = document.createElement('div')
     host.style.cssText = 'position:fixed;left:-100000px;top:0;width:1px;height:1px;overflow:hidden;pointer-events:none;'
     document.body.appendChild(host)
 
-    const renderer = new PixiEditorRenderer(exportProject, () => exportScene, () => null)
+    let activeScene: Scene = scenes[0]
+    const renderer = new PixiEditorRenderer(exportProject, () => activeScene, () => null)
     let timeline: TimelineEngine | null = null
 
     try {
@@ -48,7 +53,6 @@ export class ExportEngine {
       await renderer.mount(host)
       renderer.setControlsVisible(false)
       timeline = new TimelineEngine(renderer)
-      timeline.compile(exportScene, false)
 
       const output = new Output({ format, target: new BufferTarget() })
       const source = new CanvasSource(renderer.app!.canvas, {
@@ -59,33 +63,47 @@ export class ExportEngine {
       await output.start()
 
       const startedAt = performance.now()
-      for (let frame = 0; frame < totalFrames; frame += 1) {
-        const time = frame / fps
-        await timeline.prepareFrame(time)
-        await source.add(time, 1 / fps)
+      let processedFrames = 0
+      let globalFrame = 0
 
-        const percent = ((frame + 1) / totalFrames) * 94
-        const elapsed = (performance.now() - startedAt) / 1000
-        onProgress({
-          active: true,
-          percent,
-          title: '逐帧渲染与编码',
-          detail: `正在处理第 ${frame + 1} / ${totalFrames} 帧 · 已用 ${elapsed.toFixed(1)} 秒`,
-        })
-        if (frame % 3 === 0) await new Promise<void>((resolve) => window.setTimeout(resolve, 0))
+      for (let sceneIndex = 0; sceneIndex < scenes.length; sceneIndex += 1) {
+        activeScene = scenes[sceneIndex]
+        exportProject.currentSceneId = activeScene.id
+        await renderer.renderScene()
+        timeline.compile(activeScene, false)
+        const sceneFrames = Math.ceil(activeScene.duration * fps)
+
+        for (let frame = 0; frame < sceneFrames; frame += 1) {
+          const sceneTime = frame / fps
+          const outputTime = globalFrame / fps
+          await timeline.prepareFrame(sceneTime)
+          await source.add(outputTime, 1 / fps)
+          globalFrame += 1
+          processedFrames += 1
+
+          const percent = (processedFrames / totalFrames) * 94
+          const elapsed = (performance.now() - startedAt) / 1000
+          onProgress({
+            active: true,
+            percent,
+            title: `正在导出场景 ${sceneIndex + 1} / ${scenes.length}`,
+            detail: `${activeScene.name} · 第 ${frame + 1} / ${sceneFrames} 帧 · 已用 ${elapsed.toFixed(1)} 秒`,
+          })
+          if (processedFrames % 3 === 0) await new Promise<void>((resolve) => window.setTimeout(resolve, 0))
+        }
       }
 
-      onProgress({ active: true, percent: 96, title: '封装 MP4', detail: '画面帧已完成，正在写入 MP4 文件结构…' })
+      onProgress({ active: true, percent: 96, title: '封装完整 MP4', detail: '所有场景已串联，正在写入 MP4 文件结构…' })
       await output.finalize()
       const buffer = output.target.buffer
       if (!buffer) throw new Error('MP4 文件生成失败。')
       const blob = new Blob([buffer], { type: 'video/mp4' })
-      downloadBlob(blob, `${project.name}-${scene.name}.mp4`)
+      downloadBlob(blob, `${project.name}.mp4`)
       onProgress({
         active: true,
         percent: 100,
-        title: '导出完成',
-        detail: `文件大小 ${(blob.size / 1024 / 1024).toFixed(2)} MB，已触发下载。`,
+        title: '完整视频导出完成',
+        detail: `${scenes.length} 个场景 · ${totalDuration.toFixed(2)} 秒 · ${(blob.size / 1024 / 1024).toFixed(2)} MB`,
       })
       return blob
     } catch (error) {
