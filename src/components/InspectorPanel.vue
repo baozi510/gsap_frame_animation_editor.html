@@ -3,6 +3,13 @@ import { computed, ref } from 'vue'
 import { editorStore } from '@/store/editorStore'
 import type { AnimationClip, AnimationPhase, EditorElement } from '@/types/editor'
 import { clamp, uid } from '@/utils/helpers'
+import {
+  alignSelected,
+  getSceneContentEnd,
+  refreshSceneDuration,
+  setSceneAutoDuration,
+  setSceneDurationOffset,
+} from '@/utils/editorCommands'
 
 const emit = defineEmits<{
   live: []
@@ -15,6 +22,7 @@ const animationPhases: AnimationPhase[] = ['enter', 'hold', 'exit']
 
 const selected = computed(() => editorStore.selectedElement.value)
 const selectedClip = computed(() => selected.value?.animations.find((clip) => clip.phase === animationPhase.value) ?? null)
+const sceneContentEnd = computed(() => getSceneContentEnd(editorStore.currentScene.value))
 const enterPresets = [
   ['fade','淡入'], ['left','左侧滑入'], ['right','右侧滑入'], ['up','下方上浮'], ['down','上方落入'], ['pop','弹性放大'], ['zoom','镜头推进'], ['rotate','旋转进入'],
 ]
@@ -31,8 +39,11 @@ function mutate(mutator: (element: EditorElement) => void) {
   emit('live')
 }
 
-function commit(mutator: (element: EditorElement) => void) {
-  editorStore.updateElement(mutator)
+function commit(mutator: (element: EditorElement) => void, updateDuration = false) {
+  editorStore.updateElement((element) => {
+    mutator(element)
+    if (updateDuration) refreshSceneDuration(editorStore.currentScene.value)
+  })
 }
 
 function eventValue(event: Event) {
@@ -43,15 +54,34 @@ function eventNumber(event: Event) {
   return Number(eventValue(event))
 }
 
+function topLeftValue(key: 'x' | 'y') {
+  if (!selected.value) return 0
+  return key === 'x'
+    ? selected.value.x - selected.value.width / 2
+    : selected.value.y - selected.value.height / 2
+}
+
 function updateNumber(key: 'x' | 'y' | 'width' | 'height' | 'rotation' | 'alpha' | 'start' | 'duration', value: string) {
   const numberValue = Number(value)
   if (!Number.isFinite(numberValue)) return
   commit((element) => {
-    if (key === 'start') {
+    if (key === 'x') {
+      element.x = numberValue + element.width / 2
+    } else if (key === 'y') {
+      element.y = numberValue + element.height / 2
+    } else if (key === 'width') {
+      const left = element.x - element.width / 2
+      element.width = Math.max(1, numberValue)
+      element.x = left + element.width / 2
+    } else if (key === 'height') {
+      const top = element.y - element.height / 2
+      element.height = Math.max(1, numberValue)
+      element.y = top + element.height / 2
+    } else if (key === 'start') {
       element.start = clamp(numberValue, 0, Math.max(0, editorStore.currentScene.value.duration - 0.1))
-      element.duration = clamp(element.duration, 0.1, editorStore.currentScene.value.duration - element.start)
+      element.duration = clamp(element.duration, 0.1, Math.max(0.1, editorStore.currentScene.value.duration - element.start))
     } else if (key === 'duration') {
-      element.duration = clamp(numberValue, 0.1, editorStore.currentScene.value.duration - element.start)
+      element.duration = clamp(numberValue, 0.1, Math.max(0.1, editorStore.currentScene.value.duration - element.start))
       element.animations.forEach((clip) => {
         clip.duration = clamp(clip.duration, 0.05, element.duration)
         clip.offset = clamp(clip.offset, 0, Math.max(0, element.duration - clip.duration))
@@ -59,7 +89,14 @@ function updateNumber(key: 'x' | 'y' | 'width' | 'height' | 'rotation' | 'alpha'
     } else {
       element[key] = numberValue
     }
-  })
+  }, key === 'start' || key === 'duration')
+}
+
+function updateManualSceneDuration(event: Event) {
+  const value = Math.max(0.5, eventNumber(event))
+  editorStore.commit(() => {
+    editorStore.currentScene.value.duration = value
+  }, '场景时长已更新')
 }
 
 function segmentPresets(phase: AnimationPhase) {
@@ -132,7 +169,14 @@ function updateClip(mutator: (clip: AnimationClip, element: EditorElement) => vo
         <section class="inspector-section">
           <header><strong>场景设置</strong><small>当前画面</small></header>
           <label class="field-row"><span>名称</span><input v-model="editorStore.currentScene.value.name" @change="editorStore.persist" /></label>
-          <label class="field-row"><span>时长</span><input type="number" min="1" max="60" step="0.1" v-model.number="editorStore.currentScene.value.duration" @change="editorStore.persist" /></label>
+          <label class="field-row switch-field">
+            <span>自动时长</span>
+            <input type="checkbox" :checked="editorStore.currentScene.value.autoDuration !== false" @change="setSceneAutoDuration(($event.target as HTMLInputElement).checked)" />
+          </label>
+          <label class="field-row"><span>元素结束</span><output>{{ sceneContentEnd.toFixed(2) }}s</output></label>
+          <label class="field-row"><span>尾部 offset</span><input type="number" min="0" max="30" step="0.05" :value="editorStore.currentScene.value.durationOffset ?? 0" @change="setSceneDurationOffset(eventNumber($event))" /></label>
+          <label class="field-row"><span>场景时长</span><input type="number" min="0.5" max="600" step="0.05" :disabled="editorStore.currentScene.value.autoDuration !== false" :value="editorStore.currentScene.value.duration" @change="updateManualSceneDuration" /></label>
+          <p class="field-help">自动时长 = 最后一个元素播放完成时间 + offset。</p>
           <label class="field-row"><span>背景色</span><input type="color" v-model="editorStore.currentScene.value.background" @change="editorStore.persist" /></label>
           <label class="field-row"><span>帧率</span><select v-model.number="editorStore.project.fps" @change="editorStore.persist"><option :value="25">25 FPS</option><option :value="30">30 FPS</option><option :value="60">60 FPS</option></select></label>
         </section>
@@ -151,13 +195,25 @@ function updateClip(mutator: (clip: AnimationClip, element: EditorElement) => vo
           <header><strong>基础属性</strong><small>{{ selected.type }}</small></header>
           <label class="field-row"><span>名称</span><input :value="selected.name" @change="commit(el => el.name = eventValue($event))" /></label>
           <div class="field-grid">
-            <label><span>X</span><input type="number" :value="Math.round(selected.x)" @change="updateNumber('x', eventValue($event))" /></label>
-            <label><span>Y</span><input type="number" :value="Math.round(selected.y)" @change="updateNumber('y', eventValue($event))" /></label>
+            <label><span>X（左）</span><input type="number" :value="Math.round(topLeftValue('x'))" @change="updateNumber('x', eventValue($event))" /></label>
+            <label><span>Y（上）</span><input type="number" :value="Math.round(topLeftValue('y'))" @change="updateNumber('y', eventValue($event))" /></label>
             <label><span>宽</span><input type="number" :value="Math.round(selected.width)" @change="updateNumber('width', eventValue($event))" /></label>
             <label><span>高</span><input type="number" :value="Math.round(selected.height)" @change="updateNumber('height', eventValue($event))" /></label>
           </div>
           <label class="field-row"><span>旋转</span><input type="number" :value="selected.rotation" @change="updateNumber('rotation', eventValue($event))" /></label>
           <label class="field-row"><span>透明度</span><input type="range" min="0" max="1" step="0.01" :value="selected.alpha" @input="mutate(el => el.alpha = eventNumber($event))" /></label>
+        </section>
+
+        <section class="inspector-section">
+          <header><strong>对齐到画布</strong><small>Photoshop 式</small></header>
+          <div class="align-grid">
+            <button title="左对齐" @click="alignSelected('left')">左</button>
+            <button title="水平居中" @click="alignSelected('hcenter')">水平中</button>
+            <button title="右对齐" @click="alignSelected('right')">右</button>
+            <button title="上对齐" @click="alignSelected('top')">上</button>
+            <button title="垂直居中" @click="alignSelected('vcenter')">垂直中</button>
+            <button title="下对齐" @click="alignSelected('bottom')">下</button>
+          </div>
         </section>
 
         <section class="inspector-section">
@@ -180,7 +236,6 @@ function updateClip(mutator: (clip: AnimationClip, element: EditorElement) => vo
         </section>
 
         <section class="inspector-section action-section">
-          <button @click="editorStore.centerSelected">居中</button>
           <button @click="editorStore.duplicateSelected">复制</button>
           <button class="danger" @click="editorStore.removeSelected">删除</button>
         </section>
@@ -217,7 +272,7 @@ function updateClip(mutator: (clip: AnimationClip, element: EditorElement) => vo
           </div>
           <label class="field-row"><span>相对开始</span><input type="number" min="0" :max="selected.duration" step="0.05" :value="selectedClip.offset" @change="updateClip(clip => clip.offset = eventNumber($event))" /></label>
           <label class="field-row"><span>持续时间</span><input type="number" min="0.05" :max="selected.duration" step="0.05" :value="selectedClip.duration" @change="updateClip(clip => clip.duration = eventNumber($event))" /></label>
-          <label class="field-row"><span>效果力度</span><input type="range" min="0" max="160" step="1" :value="selectedClip.intensity" @input="updateClip(clip => clip.intensity = eventNumber($event))" /></label>
+          <label class="field-row range-with-value"><span>效果力度</span><input type="range" min="0" max="160" step="1" :value="selectedClip.intensity" @input="updateClip(clip => clip.intensity = eventNumber($event))" /><output>{{ Math.round(selectedClip.intensity) }}</output></label>
           <label class="field-row"><span>缓动曲线</span><select :value="selectedClip.ease" @change="updateClip(clip => clip.ease = eventValue($event))"><option v-for="ease in eases" :key="ease" :value="ease">{{ ease }}</option></select></label>
           <button class="remove-animation" @click="removeAnimation">删除这个动画</button>
         </section>
