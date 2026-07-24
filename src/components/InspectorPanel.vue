@@ -9,6 +9,8 @@ const emit = defineEmits<{
 }>()
 
 const tab = ref<'element' | 'animation' | 'scene'>('element')
+const animationPhase = ref<AnimationPhase>('enter')
+const animationPhases: AnimationPhase[] = ['enter', 'hold', 'exit']
 
 const selected = computed(() => editorStore.selectedElement.value)
 const enterPresets = [
@@ -20,7 +22,6 @@ const holdPresets = [
 const exitPresets = [
   ['fade','淡出'], ['left','向左退出'], ['right','向右退出'], ['up','向上退出'], ['down','向下退出'], ['pop','缩小退出'], ['zoom','放大消失'], ['rotate','旋转退出'],
 ]
-const phases: AnimationPhase[] = ['enter', 'hold', 'exit']
 const eases = ['none','power1.out','power2.out','power3.out','power2.in','power3.in','back.out(1.7)','elastic.out(1,0.45)','sine.inOut']
 
 function mutate(mutator: (element: EditorElement) => void) {
@@ -56,6 +57,12 @@ function segmentPresets(phase: AnimationPhase) {
   if (phase === 'enter') return enterPresets
   if (phase === 'hold') return holdPresets
   return exitPresets
+}
+
+function phaseLabel(phase: AnimationPhase) {
+  if (phase === 'enter') return '进场'
+  if (phase === 'hold') return '停留'
+  return '退场'
 }
 </script>
 
@@ -126,22 +133,31 @@ function segmentPresets(phase: AnimationPhase) {
           <label class="field-row"><span>开始时间</span><input type="number" min="0" :max="editorStore.currentScene.value.duration" step="0.05" :value="selected.start" @change="updateNumber('start', eventValue($event))" /></label>
         </section>
 
-        <section v-for="phase in phases" :key="phase" class="inspector-section animation-section">
+        <div class="animation-phase-tabs">
+          <button
+            v-for="phase in animationPhases"
+            :key="phase"
+            :class="{ active: animationPhase === phase }"
+            @click="animationPhase = phase"
+          >{{ phaseLabel(phase) }}</button>
+        </div>
+
+        <section class="inspector-section animation-section">
           <header>
-            <strong>{{ phase === 'enter' ? '进场动画' : phase === 'hold' ? '停留动画' : '退场动画' }}</strong>
-            <button class="preview-link" @click="emit('preview', phase)">预览</button>
+            <strong>{{ phaseLabel(animationPhase) }}动画</strong>
+            <button class="preview-link" @click="emit('preview', animationPhase)">预览</button>
           </header>
           <div class="preset-grid">
             <button
-              v-for="preset in segmentPresets(phase)"
+              v-for="preset in segmentPresets(animationPhase)"
               :key="preset[0]"
-              :class="{ active: selected[phase].preset === preset[0] }"
-              @click="setPreset(phase, preset[0])"
+              :class="{ active: selected[animationPhase].preset === preset[0] }"
+              @click="setPreset(animationPhase, preset[0])"
             >{{ preset[1] }}</button>
           </div>
-          <label class="field-row"><span>持续时间</span><input type="number" min="0.1" max="10" step="0.05" :value="selected[phase].duration" @change="commit(el => el[phase].duration = eventNumber($event))" /></label>
-          <label class="field-row"><span>效果力度</span><input type="range" min="0" max="160" step="1" :value="selected[phase].intensity" @input="mutate(el => el[phase].intensity = eventNumber($event))" /></label>
-          <label class="field-row"><span>缓动曲线</span><select :value="selected[phase].ease" @change="commit(el => el[phase].ease = eventValue($event))"><option v-for="ease in eases" :key="ease" :value="ease">{{ ease }}</option></select></label>
+          <label class="field-row"><span>持续时间</span><input type="number" min="0.1" max="10" step="0.05" :value="selected[animationPhase].duration" @change="commit(el => el[animationPhase].duration = eventNumber($event))" /></label>
+          <label class="field-row"><span>效果力度</span><input type="range" min="0" max="160" step="1" :value="selected[animationPhase].intensity" @input="mutate(el => el[animationPhase].intensity = eventNumber($event))" /></label>
+          <label class="field-row"><span>缓动曲线</span><select :value="selected[animationPhase].ease" @change="commit(el => el[animationPhase].ease = eventValue($event))"><option v-for="ease in eases" :key="ease" :value="ease">{{ ease }}</option></select></label>
         </section>
       </template>
     </div>
