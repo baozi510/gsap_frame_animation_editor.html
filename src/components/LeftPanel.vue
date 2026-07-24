@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { Eye, EyeOff, Lock, Unlock } from '@lucide/vue'
 import { demoAssets } from '@/utils/assets'
 import { editorStore } from '@/store/editorStore'
 import type { AssetFolder, ProjectAsset } from '@/types/editor'
@@ -32,6 +33,7 @@ const currentFolderId = ref<string | null>(null)
 const newFolderName = ref('')
 const cachedMap = ref<Record<string, boolean>>({})
 const draggedLayerId = ref<string | null>(null)
+const dragOverLayerId = ref<string | null>(null)
 
 const currentFolder = computed(() => folders.value.find((folder) => folder.id === currentFolderId.value) ?? null)
 const totalDuration = computed(() => getProjectDuration())
@@ -121,15 +123,34 @@ function addAsset(asset: ProjectAsset) {
 
 function startLayerDrag(id: string, event: DragEvent) {
   draggedLayerId.value = id
+  dragOverLayerId.value = id
+  editorStore.select(id)
   if (event.dataTransfer) {
     event.dataTransfer.effectAllowed = 'move'
     event.dataTransfer.setData('text/plain', id)
   }
 }
 
-function dropLayer(targetId: string) {
-  if (draggedLayerId.value) reorderLayer(draggedLayerId.value, targetId)
+function dragOverLayer(id: string, event: DragEvent) {
+  event.preventDefault()
+  dragOverLayerId.value = id
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+}
+
+function dropLayer(targetId: string, event: DragEvent) {
+  event.preventDefault()
+  const sourceId = draggedLayerId.value || event.dataTransfer?.getData('text/plain') || null
+  if (sourceId && sourceId !== targetId) reorderLayer(sourceId, targetId)
+  finishLayerDrag()
+}
+
+function finishLayerDrag() {
   draggedLayerId.value = null
+  dragOverLayerId.value = null
+}
+
+function selectLayer(id: string) {
+  editorStore.select(id)
 }
 
 function onAssetSettingsChanged() {
@@ -181,7 +202,7 @@ onBeforeUnmount(() => window.removeEventListener('motionframe:asset-settings', o
 
       <div class="section-label">远程素材</div>
       <div v-if="loadingAssets" class="asset-empty">正在读取素材库…</div>
-      <div v-else-if="!apiConfigured" class="asset-empty">点击右上角齿轮设置图片服务器</div>
+      <div v-else-if="!apiConfigured" class="asset-empty">点击右上角设置图标配置素材服务器</div>
       <div v-else-if="!assets.length" class="asset-empty">当前文件夹暂无素材</div>
       <div v-else class="asset-grid remote-asset-grid">
         <button v-for="asset in assets" :key="asset.id" class="asset-card remote-asset-card" @click="addAsset(asset)">
@@ -237,25 +258,47 @@ onBeforeUnmount(() => window.removeEventListener('motionframe:asset-settings', o
     </div>
 
     <div v-else class="panel-scroll layer-panel">
-      <div class="layer-drag-tip">拖动图层行调整层级，上方图层显示在最前面。</div>
-      <button
+      <div class="layer-drag-tip">按住图层名称拖动排序，列表越靠上，画布层级越高。</div>
+      <div
         v-for="element in orderedLayers"
         :key="element.id"
-        class="layer-row"
-        :class="{ active: element.id === editorStore.selectedId.value, dragging: element.id === draggedLayerId }"
+        class="layer-row layer-row-v5"
+        :class="{
+          active: element.id === editorStore.selectedId.value,
+          dragging: element.id === draggedLayerId,
+          'drop-target': element.id === dragOverLayerId && element.id !== draggedLayerId,
+        }"
         draggable="true"
+        role="button"
+        tabindex="0"
+        :aria-label="`图层 ${element.name}`"
         @dragstart="startLayerDrag(element.id, $event)"
-        @dragover.prevent
-        @drop.prevent="dropLayer(element.id)"
-        @dragend="draggedLayerId = null"
-        @click="editorStore.select(element.id)"
+        @dragenter.prevent="dragOverLayer(element.id, $event)"
+        @dragover="dragOverLayer(element.id, $event)"
+        @drop="dropLayer(element.id, $event)"
+        @dragend="finishLayerDrag"
+        @click="selectLayer(element.id)"
+        @keydown.enter="selectLayer(element.id)"
+        @keydown.space.prevent="selectLayer(element.id)"
       >
-        <span class="layer-grip">⋮⋮</span>
-        <span class="layer-eye" @click.stop="editorStore.commit(() => element.visible = !element.visible)">{{ element.visible ? '◉' : '○' }}</span>
-        <span class="layer-type">{{ element.type === 'image' ? '图' : element.type === 'video' ? '视' : element.type === 'shape' ? '形' : '字' }}</span>
         <span class="layer-name">{{ element.name }}</span>
-        <span class="layer-lock" @click.stop="editorStore.commit(() => element.locked = !element.locked)">{{ element.locked ? '锁' : '开' }}</span>
-      </button>
+        <div class="layer-row-actions">
+          <button
+            type="button"
+            draggable="false"
+            :title="element.visible ? '隐藏图层' : '显示图层'"
+            :aria-label="element.visible ? '隐藏图层' : '显示图层'"
+            @click.stop="editorStore.commit(() => element.visible = !element.visible)"
+          ><Eye v-if="element.visible" :size="14" /><EyeOff v-else :size="14" /></button>
+          <button
+            type="button"
+            draggable="false"
+            :title="element.locked ? '解锁图层' : '锁定图层'"
+            :aria-label="element.locked ? '解锁图层' : '锁定图层'"
+            @click.stop="editorStore.commit(() => element.locked = !element.locked)"
+          ><Lock v-if="element.locked" :size="14" /><Unlock v-else :size="14" /></button>
+        </div>
+      </div>
     </div>
   </aside>
 </template>
