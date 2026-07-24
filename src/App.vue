@@ -5,11 +5,12 @@ import LeftPanel from '@/components/LeftPanel.vue'
 import InspectorPanel from '@/components/InspectorPanel.vue'
 import TimelinePanel from '@/components/TimelinePanel.vue'
 import ExportDialog from '@/components/ExportDialog.vue'
+import SettingsDialog from '@/components/SettingsDialog.vue'
 import { editorStore } from '@/store/editorStore'
 import { ExportEngine } from '@/engine/ExportEngine'
 import type { AnimationPhase, ExportProgress, Project } from '@/types/editor'
 import { downloadBlob } from '@/utils/helpers'
-import { clearCurrentScene, moveSelectedLayer } from '@/utils/editorCommands'
+import { alignSelected, clearCurrentScene } from '@/utils/editorCommands'
 
 const canvas = ref<InstanceType<typeof CanvasEditor> | null>(null)
 const currentTime = ref(0)
@@ -17,6 +18,7 @@ const playing = ref(false)
 const loop = ref(false)
 const zoom = ref(1)
 const projectInput = ref<HTMLInputElement | null>(null)
+const settingsOpen = ref(false)
 const exportSupported = ref<boolean | null>(null)
 const exportProgress = reactive<ExportProgress>({ active: false, percent: 0, title: '', detail: '' })
 const exportEngine = new ExportEngine()
@@ -164,6 +166,7 @@ onUnmounted(() => window.removeEventListener('keydown', keyboard))
         :title="exportSupported === false ? '当前浏览器不支持 H.264 WebCodecs' : '按场景顺序导出完整 MP4'"
         @click="exportMp4"
       >导出完整 MP4</button>
+      <button class="settings-trigger" title="设置" aria-label="设置" @click="settingsOpen = true">⚙</button>
     </header>
 
     <section class="workspace">
@@ -171,13 +174,17 @@ onUnmounted(() => window.removeEventListener('keydown', keyboard))
 
       <section class="canvas-column">
         <div class="canvas-toolbar">
+          <div class="toolbar-group alignment-toolbar">
+            <span class="toolbar-label">对齐到画布</span>
+            <button title="左对齐" @click="alignSelected('left')">左</button>
+            <button title="水平居中" @click="alignSelected('hcenter')">水平中</button>
+            <button title="右对齐" @click="alignSelected('right')">右</button>
+            <button title="上对齐" @click="alignSelected('top')">上</button>
+            <button title="垂直居中" @click="alignSelected('vcenter')">垂直中</button>
+            <button title="下对齐" @click="alignSelected('bottom')">下</button>
+          </div>
           <div class="toolbar-group">
-            <button @click="editorStore.centerSelected">居中</button>
             <button @click="editorStore.duplicateSelected">复制</button>
-            <button @click="moveSelectedLayer('bottom')">置底</button>
-            <button @click="moveSelectedLayer('down')">下移</button>
-            <button @click="moveSelectedLayer('up')">上移</button>
-            <button @click="moveSelectedLayer('top')">置顶</button>
             <button @click="editorStore.removeSelected">删除</button>
             <button class="danger-toolbar" @click="clearCurrentScene">清空画布</button>
           </div>
@@ -211,5 +218,6 @@ onUnmounted(() => window.removeEventListener('keydown', keyboard))
 
     <div v-if="editorStore.toastMessage.value" class="toast">{{ editorStore.toastMessage.value }}</div>
     <ExportDialog :progress="exportProgress" @close="closeExport" />
+    <SettingsDialog :open="settingsOpen" @close="settingsOpen = false" />
   </main>
 </template>
