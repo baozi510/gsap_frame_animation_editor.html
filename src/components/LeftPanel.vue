@@ -15,6 +15,13 @@ import {
   setAssetApiToken,
   uploadRemoteAsset,
 } from '@/services/assets'
+import {
+  addExitToAllElements,
+  addRemoteAssetToScene,
+  getProjectDuration,
+  moveScene,
+  moveSelectedLayer,
+} from '@/utils/editorCommands'
 
 const props = defineProps<{ currentTime: number }>()
 const tab = ref<'assets' | 'scenes' | 'layers'>('assets')
@@ -31,6 +38,7 @@ const newFolderName = ref('')
 const cachedMap = ref<Record<string, boolean>>({})
 
 const currentFolder = computed(() => folders.value.find((folder) => folder.id === currentFolderId.value) ?? null)
+const totalDuration = computed(() => getProjectDuration())
 
 function onUploadChange(event: Event) {
   const input = event.target as HTMLInputElement
@@ -110,7 +118,7 @@ async function uploadFiles(files: File[]) {
 }
 
 function addAsset(asset: ProjectAsset) {
-  editorStore.addLibraryAsset(asset, props.currentTime)
+  addRemoteAssetToScene(asset, props.currentTime)
 }
 
 onMounted(() => {
@@ -166,7 +174,7 @@ onMounted(() => {
           <img v-if="asset.type === 'image' && (asset.thumbnailUrl || asset.downloadUrl)" :src="asset.thumbnailUrl || asset.downloadUrl" :alt="asset.name" />
           <div v-else class="video-thumb">▶</div>
           <span>{{ asset.name }}</span>
-          <small :class="{ cached: cachedMap[asset.id] }">{{ cachedMap[asset.id] ? '本地已缓存' : asset.type === 'video' ? '远程视频' : '远程图片' }}</small>
+          <small :class="{ cached: cachedMap[asset.id] }">{{ cachedMap[asset.id] ? '本地已缓存' : asset.type === 'video' ? `${asset.duration?.toFixed(1) ?? '--'}s 视频` : '远程图片' }}</small>
         </button>
       </div>
 
@@ -187,17 +195,34 @@ onMounted(() => {
     </div>
 
     <div v-else-if="tab === 'scenes'" class="panel-scroll scene-panel">
-      <button
+      <div class="scene-sequence-summary">
+        <strong>完整视频</strong>
+        <span>{{ editorStore.project.scenes.length }} 个场景 · {{ totalDuration.toFixed(1) }}s</span>
+        <small>列表顺序就是最终视频顺序，场景结束后自动进入下一场景。</small>
+      </div>
+      <div
         v-for="(scene, index) in editorStore.project.scenes"
         :key="scene.id"
-        class="scene-row"
-        :class="{ active: scene.id === editorStore.project.currentSceneId }"
-        @click="editorStore.switchScene(scene.id)"
+        class="scene-row-wrap"
       >
-        <span class="scene-index">{{ index + 1 }}</span>
-        <span class="scene-copy"><strong>{{ scene.name }}</strong><small>{{ scene.elements.length }} 个元素</small></span>
-        <span class="scene-duration">{{ scene.duration.toFixed(1) }}s</span>
-      </button>
+        <button
+          class="scene-row"
+          :class="{ active: scene.id === editorStore.project.currentSceneId }"
+          @click="editorStore.switchScene(scene.id)"
+        >
+          <span class="scene-index">{{ index + 1 }}</span>
+          <span class="scene-copy"><strong>{{ scene.name }}</strong><small>{{ scene.elements.length }} 个元素</small></span>
+          <span class="scene-duration">{{ scene.duration.toFixed(1) }}s</span>
+        </button>
+        <div class="scene-order-actions">
+          <button :disabled="index === 0" title="场景上移" @click="moveScene(scene.id, -1)">↑</button>
+          <button :disabled="index === editorStore.project.scenes.length - 1" title="场景下移" @click="moveScene(scene.id, 1)">↓</button>
+        </div>
+      </div>
+      <div class="scene-transition-actions">
+        <button @click="addExitToAllElements(0.5)">当前场景全体淡出</button>
+        <small>会在场景最后 0.5 秒为所有元素添加统一退场。</small>
+      </div>
       <div class="scene-actions">
         <button @click="editorStore.addScene">＋ 新场景</button>
         <button @click="editorStore.duplicateScene">复制</button>
@@ -206,6 +231,12 @@ onMounted(() => {
     </div>
 
     <div v-else class="panel-scroll layer-panel">
+      <div class="layer-order-toolbar">
+        <button @click="moveSelectedLayer('bottom')">置底</button>
+        <button @click="moveSelectedLayer('down')">下移</button>
+        <button @click="moveSelectedLayer('up')">上移</button>
+        <button @click="moveSelectedLayer('top')">置顶</button>
+      </div>
       <button
         v-for="element in [...editorStore.currentScene.value.elements].sort((a,b) => b.z-a.z)"
         :key="element.id"
