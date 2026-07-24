@@ -36,16 +36,24 @@ export function moveSelectedLayer(direction: 'up' | 'down' | 'top' | 'bottom') {
   }, '元素层级已调整')
 }
 
-export function reorderLayer(draggedId: string, targetId: string) {
+export type LayerDropPosition = 'before' | 'after'
+
+export function reorderLayer(draggedId: string, targetId: string, position: LayerDropPosition = 'before') {
   if (draggedId === targetId) return
   editorStore.commit(() => {
-    const displayOrder = [...editorStore.currentScene.value.elements].sort((a, b) => b.z - a.z)
+    const scene = editorStore.currentScene.value
+    const displayOrder = [...scene.elements].sort((a, b) => b.z - a.z)
     const from = displayOrder.findIndex((item) => item.id === draggedId)
-    const to = displayOrder.findIndex((item) => item.id === targetId)
-    if (from < 0 || to < 0) return
+    if (from < 0) return
+
     const [moved] = displayOrder.splice(from, 1)
-    displayOrder.splice(to, 0, moved)
+    const targetIndex = displayOrder.findIndex((item) => item.id === targetId)
+    if (targetIndex < 0) return
+    const insertIndex = targetIndex + (position === 'after' ? 1 : 0)
+    displayOrder.splice(insertIndex, 0, moved)
+
     displayOrder.forEach((item, index) => { item.z = displayOrder.length - index })
+    scene.elements = [...displayOrder].sort((a, b) => a.z - b.z)
   }, '图层顺序已调整')
 }
 
@@ -62,6 +70,37 @@ export function alignSelected(mode: AlignMode) {
     if (mode === 'vcenter') target.y = editorStore.project.height / 2
     if (mode === 'bottom') target.y = editorStore.project.height - target.height / 2
   }, '元素已对齐到画布')
+}
+
+export function changeCanvasRatio(width: number, height: number) {
+  const project = editorStore.project
+  const oldWidth = project.width
+  const oldHeight = project.height
+  if (oldWidth === width && oldHeight === height) return
+
+  const scaleX = width / oldWidth
+  const scaleY = height / oldHeight
+  const containScale = Math.min(scaleX, scaleY)
+  const coverScale = Math.max(scaleX, scaleY)
+
+  editorStore.commit(() => {
+    project.scenes.forEach((scene) => scene.elements.forEach((element) => {
+      const coveredOldCanvas = Math.abs(element.x - oldWidth / 2) < 2
+        && Math.abs(element.y - oldHeight / 2) < 2
+        && element.width >= oldWidth - 2
+        && element.height >= oldHeight - 2
+      const elementScale = coveredOldCanvas ? coverScale : containScale
+
+      element.x = coveredOldCanvas ? width / 2 : element.x * scaleX
+      element.y = coveredOldCanvas ? height / 2 : element.y * scaleY
+      element.width *= elementScale
+      element.height *= elementScale
+      if (typeof element.style.fontSize === 'number') element.style.fontSize *= elementScale
+      if (typeof element.style.radius === 'number') element.style.radius *= elementScale
+    }))
+    project.width = width
+    project.height = height
+  }, '画布比例已切换，元素保持等比')
 }
 
 export function getSceneContentEnd(scene: Scene) {
