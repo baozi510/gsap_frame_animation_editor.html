@@ -1,0 +1,227 @@
+.topbar {
+  gap: 5px;
+  padding-inline: 10px;
+}
+
+.topbar .brand {
+  width: 172px;
+}
+
+.topbar .project-name {
+  width: 142px;
+}
+
+.topbar .ratio-group {
+  flex: none;
+  gap: 2px;
+}
+
+.topbar .ratio-group button {
+  padding-inline: 7px;
+}
+
+.top-editor-tools,
+.top-icon-group {
+  display: flex;
+  align-items: center;
+}
+
+.top-editor-tools {
+  min-width: 0;
+  gap: 5px;
+  margin-left: 2px;
+}
+
+.top-icon-group {
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid #222731;
+  border-radius: 7px;
+  background: #0e1015;
+}
+
+.compact-icon-button {
+  width: 28px;
+  height: 27px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: #aeb5c2;
+}
+
+.compact-icon-button:hover:not(:disabled) {
+  border-color: #3d4451;
+  background: #242933;
+  color: #fff;
+}
+
+.compact-icon-button:disabled {
+  opacity: .3;
+  cursor: not-allowed;
+}
+
+.danger-icon-button {
+  color: #ec8292;
+}
+
+.top-zoom-group {
+  gap: 1px;
+}
+
+.top-zoom-group > span {
+  width: 37px;
+  color: #b6bdc9;
+  font-size: 8px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-trigger {
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+
+.canvas-viewport {
+  inset: 0 !important;
+}
+
+.stage-center {
+  padding: 18px !important;
+}
+
+.workspace {
+  grid-template-columns: 272px minmax(0, 1fr) 310px;
+}
+
+.layer-panel {
+  padding-inline: 8px;
+}
+
+.layer-drag-tip {
+  margin: 8px 5px 9px;
+}
+
+.layer-row-v5 {
+  position: relative;
+  height: 38px;
+  margin-bottom: 2px;
+  padding: 0 5px 0 10px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  outline: 0;
+  cursor: grab;
+  user-select: none;
+}
+
+.layer-row-v5:active {
+  cursor: grabbing;
+}
+
+.layer-row-v5:focus-visible {
+  border-color: #6a58c9;
+}
+
+.layer-row-v5 .layer-name {
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  color: #c6cbd5;
+  font-size: 10px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.layer-row-v5.active .layer-name {
+  color: #fff;
+}
+
+.layer-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.layer-row-actions button {
+  width: 27px;
+  height: 27px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #747d8d;
+}
+
+.layer-row-actions button:hover {
+  background: #303541;
+  color: #fff;
+}
+
+.layer-row-v5.dragging {
+  opacity: .28;
+}
+
+.layer-row-v5.drop-before::before,
+.layer-row-v5.drop-after::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  height: 2px;
+  border-radius: 2px;
+  background: #8d7cff;
+  box-shadow: 0 0 0 1px #17131f;
+  pointer-events: none;
+}
+
+.layer-row-v5.drop-before::before {
+  top: -2px;
+}
+
+.layer-row-v5.drop-after::after {
+  bottom: -2px;
+}
+
+.range-with-value {
+  grid-template-columns: 72px minmax(0, 1fr) 43px !important;
+}
+
+.range-with-value output {
+  white-space: nowrap;
+}
+
+.animation-strength-help {
+  margin-top: -2px;
+}
+
+@media (max-width: 1360px) {
+  .topbar .brand {
+    width: 42px;
+  }
+
+  .topbar .brand > div {
+    display: none;
+  }
+
+  .topbar .project-name {
+    width: 120px;
+  }
+
+  .topbar .top-button {
+    padding-inline: 8px;
+  }
+
+  .top-zoom-group > span {
+    display: none;
+  }
+}
