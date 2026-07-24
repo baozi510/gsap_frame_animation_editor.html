@@ -1,8 +1,10 @@
-export type ElementType = 'image' | 'shape' | 'text'
+export type AssetType = 'image' | 'video'
+export type ElementType = AssetType | 'shape' | 'text'
 export type AnimationPhase = 'enter' | 'hold' | 'exit'
 export type EnterPreset = 'fade' | 'left' | 'right' | 'up' | 'down' | 'pop' | 'zoom' | 'rotate'
-export type HoldPreset = 'none' | 'float' | 'pulse' | 'swing' | 'shake' | 'zoom'
+export type HoldPreset = 'float' | 'pulse' | 'swing' | 'shake' | 'zoom'
 export type ExitPreset = EnterPreset
+export type AnimationPreset = EnterPreset | HoldPreset | ExitPreset
 export type EditorFontWeight =
   | 'normal'
   | 'bold'
@@ -18,11 +20,38 @@ export type EditorFontWeight =
   | '800'
   | '900'
 
-export interface AnimationSegment<TPreset extends string = string> {
-  preset: TPreset
+export interface AnimationClip {
+  id: string
+  phase: AnimationPhase
+  /** Relative to the element's start time. */
+  offset: number
   duration: number
+  preset: AnimationPreset
   ease: string
   intensity: number
+}
+
+export interface ProjectAsset {
+  id: string
+  type: AssetType
+  name: string
+  mimeType: string
+  size: number
+  width: number
+  height: number
+  duration?: number
+  hash?: string
+  folderId?: string | null
+  downloadUrl?: string
+  thumbnailUrl?: string
+  createdAt?: string
+}
+
+export interface AssetFolder {
+  id: string
+  name: string
+  parentId?: string | null
+  createdAt?: string
 }
 
 export interface ElementStyle {
@@ -39,7 +68,9 @@ export interface EditorElement {
   id: string
   type: ElementType
   name: string
+  /** Direct source is reserved for built-in/demo assets. Remote assets use assetId. */
   src?: string
+  assetId?: string
   text?: string
   x: number
   y: number
@@ -51,9 +82,10 @@ export interface EditorElement {
   visible: boolean
   locked: boolean
   start: number
-  enter: AnimationSegment<EnterPreset>
-  hold: AnimationSegment<HoldPreset>
-  exit: AnimationSegment<ExitPreset>
+  /** Independent visible span on the scene timeline. */
+  duration: number
+  /** Optional animation overlays. An element may have zero animations. */
+  animations: AnimationClip[]
   style: ElementStyle
 }
 
@@ -72,6 +104,7 @@ export interface Project {
   height: number
   fps: number
   currentSceneId: string
+  assets: ProjectAsset[]
   scenes: Scene[]
 }
 

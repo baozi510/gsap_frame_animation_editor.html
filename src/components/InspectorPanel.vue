@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { editorStore } from '@/store/editorStore'
-import type { AnimationPhase, EditorElement } from '@/types/editor'
+import type { AnimationClip, AnimationPhase, EditorElement } from '@/types/editor'
+import { clamp, uid } from '@/utils/helpers'
 
 const emit = defineEmits<{
   live: []
@@ -13,11 +14,12 @@ const animationPhase = ref<AnimationPhase>('enter')
 const animationPhases: AnimationPhase[] = ['enter', 'hold', 'exit']
 
 const selected = computed(() => editorStore.selectedElement.value)
+const selectedClip = computed(() => selected.value?.animations.find((clip) => clip.phase === animationPhase.value) ?? null)
 const enterPresets = [
   ['fade','淡入'], ['left','左侧滑入'], ['right','右侧滑入'], ['up','下方上浮'], ['down','上方落入'], ['pop','弹性放大'], ['zoom','镜头推进'], ['rotate','旋转进入'],
 ]
 const holdPresets = [
-  ['none','静止'], ['float','轻微漂浮'], ['pulse','呼吸缩放'], ['swing','左右摇摆'], ['shake','轻微抖动'], ['zoom','缓慢推进'],
+  ['float','轻微漂浮'], ['pulse','呼吸缩放'], ['swing','左右摇摆'], ['shake','轻微抖动'], ['zoom','缓慢推进'],
 ]
 const exitPresets = [
   ['fade','淡出'], ['left','向左退出'], ['right','向右退出'], ['up','向上退出'], ['down','向下退出'], ['pop','缩小退出'], ['zoom','放大消失'], ['rotate','旋转退出'],
@@ -41,15 +43,22 @@ function eventNumber(event: Event) {
   return Number(eventValue(event))
 }
 
-function updateNumber(key: 'x' | 'y' | 'width' | 'height' | 'rotation' | 'alpha' | 'start', value: string) {
+function updateNumber(key: 'x' | 'y' | 'width' | 'height' | 'rotation' | 'alpha' | 'start' | 'duration', value: string) {
   const numberValue = Number(value)
   if (!Number.isFinite(numberValue)) return
-  commit((element) => { element[key] = numberValue })
-}
-
-function setPreset(phase: AnimationPhase, preset: string) {
   commit((element) => {
-    element[phase].preset = preset as never
+    if (key === 'start') {
+      element.start = clamp(numberValue, 0, Math.max(0, editorStore.currentScene.value.duration - 0.1))
+      element.duration = clamp(element.duration, 0.1, editorStore.currentScene.value.duration - element.start)
+    } else if (key === 'duration') {
+      element.duration = clamp(numberValue, 0.1, editorStore.currentScene.value.duration - element.start)
+      element.animations.forEach((clip) => {
+        clip.duration = clamp(clip.duration, 0.05, element.duration)
+        clip.offset = clamp(clip.offset, 0, Math.max(0, element.duration - clip.duration))
+      })
+    } else {
+      element[key] = numberValue
+    }
   })
 }
 
@@ -61,8 +70,52 @@ function segmentPresets(phase: AnimationPhase) {
 
 function phaseLabel(phase: AnimationPhase) {
   if (phase === 'enter') return '进场'
-  if (phase === 'hold') return '停留'
+  if (phase === 'hold') return '强调'
   return '退场'
+}
+
+function addAnimation() {
+  if (!selected.value || selectedClip.value) return
+  const duration = Math.min(0.6, selected.value.duration)
+  const offset = animationPhase.value === 'enter'
+    ? 0
+    : animationPhase.value === 'exit'
+      ? Math.max(0, selected.value.duration - duration)
+      : Math.max(0, (selected.value.duration - duration) / 2)
+  const defaults: Record<AnimationPhase, Pick<AnimationClip, 'preset' | 'ease' | 'intensity'>> = {
+    enter: { preset: 'fade', ease: 'power2.out', intensity: 100 },
+    hold: { preset: 'float', ease: 'sine.inOut', intensity: 18 },
+    exit: { preset: 'fade', ease: 'power2.in', intensity: 100 },
+  }
+  commit((element) => {
+    element.animations.push({
+      id: uid('anim'),
+      phase: animationPhase.value,
+      offset,
+      duration,
+      ...defaults[animationPhase.value],
+    })
+  })
+}
+
+function removeAnimation() {
+  commit((element) => {
+    element.animations = element.animations.filter((clip) => clip.phase !== animationPhase.value)
+  })
+}
+
+function setPreset(preset: string) {
+  updateClip((clip) => { clip.preset = preset as AnimationClip['preset'] })
+}
+
+function updateClip(mutator: (clip: AnimationClip, element: EditorElement) => void) {
+  commit((element) => {
+    const clip = element.animations.find((item) => item.phase === animationPhase.value)
+    if (!clip) return
+    mutator(clip, element)
+    clip.duration = clamp(clip.duration, 0.05, element.duration)
+    clip.offset = clamp(clip.offset, 0, Math.max(0, element.duration - clip.duration))
+  })
 }
 </script>
 
@@ -79,7 +132,7 @@ function phaseLabel(phase: AnimationPhase) {
         <section class="inspector-section">
           <header><strong>场景设置</strong><small>当前画面</small></header>
           <label class="field-row"><span>名称</span><input v-model="editorStore.currentScene.value.name" @change="editorStore.persist" /></label>
-          <label class="field-row"><span>时长</span><input type="number" min="1" max="30" step="0.1" v-model.number="editorStore.currentScene.value.duration" @change="editorStore.persist" /></label>
+          <label class="field-row"><span>时长</span><input type="number" min="1" max="60" step="0.1" v-model.number="editorStore.currentScene.value.duration" @change="editorStore.persist" /></label>
           <label class="field-row"><span>背景色</span><input type="color" v-model="editorStore.currentScene.value.background" @change="editorStore.persist" /></label>
           <label class="field-row"><span>帧率</span><select v-model.number="editorStore.project.fps" @change="editorStore.persist"><option :value="25">25 FPS</option><option :value="30">30 FPS</option><option :value="60">60 FPS</option></select></label>
         </section>
@@ -89,7 +142,7 @@ function phaseLabel(phase: AnimationPhase) {
         <div class="empty-inspector">
           <div class="empty-icon">◇</div>
           <strong>选择一个画布元素</strong>
-          <span>可以调整位置、尺寸和动画效果。</span>
+          <span>可以调整位置、显示时长和可选动画。</span>
         </div>
       </template>
 
@@ -105,6 +158,12 @@ function phaseLabel(phase: AnimationPhase) {
           </div>
           <label class="field-row"><span>旋转</span><input type="number" :value="selected.rotation" @change="updateNumber('rotation', eventValue($event))" /></label>
           <label class="field-row"><span>透明度</span><input type="range" min="0" max="1" step="0.01" :value="selected.alpha" @input="mutate(el => el.alpha = eventNumber($event))" /></label>
+        </section>
+
+        <section class="inspector-section">
+          <header><strong>时间范围</strong><small>独立于动画</small></header>
+          <label class="field-row"><span>开始时间</span><input type="number" min="0" :max="editorStore.currentScene.value.duration" step="0.05" :value="selected.start" @change="updateNumber('start', eventValue($event))" /></label>
+          <label class="field-row"><span>显示时长</span><input type="number" min="0.1" :max="editorStore.currentScene.value.duration - selected.start" step="0.05" :value="selected.duration" @change="updateNumber('duration', eventValue($event))" /></label>
         </section>
 
         <section v-if="selected.type === 'shape'" class="inspector-section">
@@ -128,21 +187,22 @@ function phaseLabel(phase: AnimationPhase) {
       </template>
 
       <template v-else>
-        <section class="inspector-section">
-          <header><strong>时间位置</strong><small>元素何时开始</small></header>
-          <label class="field-row"><span>开始时间</span><input type="number" min="0" :max="editorStore.currentScene.value.duration" step="0.05" :value="selected.start" @change="updateNumber('start', eventValue($event))" /></label>
-        </section>
-
         <div class="animation-phase-tabs">
           <button
             v-for="phase in animationPhases"
             :key="phase"
-            :class="{ active: animationPhase === phase }"
+            :class="{ active: animationPhase === phase, configured: selected.animations.some(item => item.phase === phase) }"
             @click="animationPhase = phase"
           >{{ phaseLabel(phase) }}</button>
         </div>
 
-        <section class="inspector-section animation-section">
+        <section v-if="!selectedClip" class="inspector-section animation-empty">
+          <strong>这个元素没有{{ phaseLabel(animationPhase) }}动画</strong>
+          <span>元素本身仍会在设置的时间范围内正常显示。</span>
+          <button @click="addAnimation">＋ 添加{{ phaseLabel(animationPhase) }}动画</button>
+        </section>
+
+        <section v-else class="inspector-section animation-section">
           <header>
             <strong>{{ phaseLabel(animationPhase) }}动画</strong>
             <button class="preview-link" @click="emit('preview', animationPhase)">预览</button>
@@ -151,13 +211,15 @@ function phaseLabel(phase: AnimationPhase) {
             <button
               v-for="preset in segmentPresets(animationPhase)"
               :key="preset[0]"
-              :class="{ active: selected[animationPhase].preset === preset[0] }"
-              @click="setPreset(animationPhase, preset[0])"
+              :class="{ active: selectedClip.preset === preset[0] }"
+              @click="setPreset(preset[0])"
             >{{ preset[1] }}</button>
           </div>
-          <label class="field-row"><span>持续时间</span><input type="number" min="0.1" max="10" step="0.05" :value="selected[animationPhase].duration" @change="commit(el => el[animationPhase].duration = eventNumber($event))" /></label>
-          <label class="field-row"><span>效果力度</span><input type="range" min="0" max="160" step="1" :value="selected[animationPhase].intensity" @input="mutate(el => el[animationPhase].intensity = eventNumber($event))" /></label>
-          <label class="field-row"><span>缓动曲线</span><select :value="selected[animationPhase].ease" @change="commit(el => el[animationPhase].ease = eventValue($event))"><option v-for="ease in eases" :key="ease" :value="ease">{{ ease }}</option></select></label>
+          <label class="field-row"><span>相对开始</span><input type="number" min="0" :max="selected.duration" step="0.05" :value="selectedClip.offset" @change="updateClip(clip => clip.offset = eventNumber($event))" /></label>
+          <label class="field-row"><span>持续时间</span><input type="number" min="0.05" :max="selected.duration" step="0.05" :value="selectedClip.duration" @change="updateClip(clip => clip.duration = eventNumber($event))" /></label>
+          <label class="field-row"><span>效果力度</span><input type="range" min="0" max="160" step="1" :value="selectedClip.intensity" @input="updateClip(clip => clip.intensity = eventNumber($event))" /></label>
+          <label class="field-row"><span>缓动曲线</span><select :value="selectedClip.ease" @change="updateClip(clip => clip.ease = eventValue($event))"><option v-for="ease in eases" :key="ease" :value="ease">{{ ease }}</option></select></label>
+          <button class="remove-animation" @click="removeAnimation">删除这个动画</button>
         </section>
       </template>
     </div>

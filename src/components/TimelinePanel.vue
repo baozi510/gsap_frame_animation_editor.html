@@ -30,9 +30,7 @@ const tickStep = computed(() => {
 const ticks = computed(() => {
   const result: number[] = []
   const step = tickStep.value
-  for (let value = 0; value <= scene.value.duration + 0.0001; value += step) {
-    result.push(Number(value.toFixed(2)))
-  }
+  for (let value = 0; value <= scene.value.duration + 0.0001; value += step) result.push(Number(value.toFixed(2)))
   if (Math.abs((result.at(-1) ?? 0) - scene.value.duration) > 0.01) result.push(scene.value.duration)
   return result
 })
@@ -53,9 +51,8 @@ function clipStyle(start: number, duration: number) {
   }
 }
 
-function elementSpanStyle(element: (typeof elements.value)[number]) {
-  const duration = element.enter.duration + element.hold.duration + element.exit.duration
-  return clipStyle(element.start, duration)
+function animationStyle(elementStart: number, offset: number, duration: number) {
+  return clipStyle(elementStart + offset, duration)
 }
 
 function seekFromPointer(event: PointerEvent) {
@@ -90,6 +87,12 @@ function setTimelineZoom(value: number) {
   timelineZoom.value = clamp(value, 1, 4)
 }
 
+function phaseLabel(phase: string) {
+  if (phase === 'enter') return '进场'
+  if (phase === 'hold') return '强调'
+  return '退场'
+}
+
 onMounted(() => {
   resizeObserver = new ResizeObserver(([entry]) => {
     viewportWidth.value = Math.max(1, entry.contentRect.width)
@@ -112,6 +115,11 @@ onBeforeUnmount(() => resizeObserver?.disconnect())
       <strong>{{ currentTime.toFixed(2) }}s</strong>
       <span>/ {{ scene.duration.toFixed(2) }}s</span>
       <div class="timeline-spacer" />
+      <div class="timeline-legend">
+        <span><i class="enter" />进场</span>
+        <span><i class="hold" />强调</span>
+        <span><i class="exit" />退场</span>
+      </div>
       <div class="timeline-zoom">
         <button title="缩小时间轨" @click="setTimelineZoom(timelineZoom - 0.25)">－</button>
         <input
@@ -137,7 +145,10 @@ onBeforeUnmount(() => resizeObserver?.disconnect())
           :key="element.id"
           :class="{ active: element.id === editorStore.selectedId.value }"
           @click="editorStore.select(element.id)"
-        >{{ element.name }}</button>
+        >
+          <span>{{ element.name }}</span>
+          <small>{{ element.duration.toFixed(1) }}s</small>
+        </button>
       </div>
 
       <div ref="viewport" class="timeline-tracks">
@@ -167,12 +178,17 @@ onBeforeUnmount(() => resizeObserver?.disconnect())
             :data-element-id="element.id"
             :style="gridStyle"
           >
-            <div class="clip enter" :style="clipStyle(element.start, element.enter.duration)" />
-            <div class="clip hold" :style="clipStyle(element.start + element.enter.duration, element.hold.duration)" />
-            <div class="clip exit" :style="clipStyle(element.start + element.enter.duration + element.hold.duration, element.exit.duration)" />
-            <div class="clip-label" :style="elementSpanStyle(element)" :title="element.name">
+            <div class="element-span" :style="clipStyle(element.start, element.duration)" :title="`${element.name} · ${element.duration.toFixed(2)}s`">
               <span>{{ element.name }}</span>
             </div>
+            <div
+              v-for="clip in element.animations"
+              :key="clip.id"
+              class="animation-overlay"
+              :class="clip.phase"
+              :style="animationStyle(element.start, clip.offset, clip.duration)"
+              :title="`${phaseLabel(clip.phase)} · ${clip.preset} · ${clip.duration.toFixed(2)}s`"
+            />
           </div>
 
           <div class="playhead" :style="{ left: playheadLeft }"><i /></div>
