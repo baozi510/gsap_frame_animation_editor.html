@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { demoAssets } from '@/utils/assets'
 import { editorStore } from '@/store/editorStore'
 import type { AssetFolder, ProjectAsset } from '@/types/editor'
@@ -7,12 +7,9 @@ import {
   cacheAssetBlob,
   createAssetFolder,
   getAssetApiBase,
-  getAssetApiToken,
   hasCachedAsset,
   listAssetFolders,
   listRemoteAssets,
-  setAssetApiBase,
-  setAssetApiToken,
   uploadRemoteAsset,
 } from '@/services/assets'
 import {
@@ -20,15 +17,13 @@ import {
   addRemoteAssetToScene,
   getProjectDuration,
   moveScene,
-  moveSelectedLayer,
+  reorderLayer,
 } from '@/utils/editorCommands'
 
 const props = defineProps<{ currentTime: number }>()
 const tab = ref<'assets' | 'scenes' | 'layers'>('assets')
 const fileInput = ref<HTMLInputElement | null>(null)
-const apiBase = ref(getAssetApiBase())
-const apiToken = ref(getAssetApiToken())
-const showApiSettings = ref(!apiBase.value)
+const apiConfigured = ref(Boolean(getAssetApiBase()))
 const loadingAssets = ref(false)
 const uploading = ref(false)
 const folders = ref<AssetFolder[]>([])
@@ -36,24 +31,24 @@ const assets = ref<ProjectAsset[]>([])
 const currentFolderId = ref<string | null>(null)
 const newFolderName = ref('')
 const cachedMap = ref<Record<string, boolean>>({})
+const draggedLayerId = ref<string | null>(null)
 
 const currentFolder = computed(() => folders.value.find((folder) => folder.id === currentFolderId.value) ?? null)
 const totalDuration = computed(() => getProjectDuration())
+const orderedLayers = computed(() => [...editorStore.currentScene.value.elements].sort((a, b) => b.z - a.z))
 
 function onUploadChange(event: Event) {
   const input = event.target as HTMLInputElement
   void uploadFiles(Array.from(input.files ?? []))
 }
 
-async function saveApiSettings() {
-  setAssetApiBase(apiBase.value)
-  setAssetApiToken(apiToken.value)
-  showApiSettings.value = false
-  await loadLibrary()
-}
-
 async function loadLibrary() {
-  if (!getAssetApiBase()) return
+  apiConfigured.value = Boolean(getAssetApiBase())
+  if (!apiConfigured.value) {
+    folders.value = []
+    assets.value = []
+    return
+  }
   loadingAssets.value = true
   try {
     const [folderResult, assetResult] = await Promise.all([
@@ -79,6 +74,10 @@ async function openFolder(folderId: string | null) {
 async function createFolder() {
   const name = newFolderName.value.trim()
   if (!name) return
+  if (!apiConfigured.value) {
+    editorStore.notify('请点击右上角设置素材服务器')
+    return
+  }
   try {
     await createAssetFolder(name, currentFolderId.value)
     newFolderName.value = ''
@@ -92,8 +91,7 @@ async function createFolder() {
 async function uploadFiles(files: File[]) {
   if (!files.length) return
   if (!getAssetApiBase()) {
-    showApiSettings.value = true
-    editorStore.notify('请先设置素材 API 地址')
+    editorStore.notify('请点击右上角设置素材服务器')
     return
   }
   uploading.value = true
@@ -121,9 +119,30 @@ function addAsset(asset: ProjectAsset) {
   addRemoteAssetToScene(asset, props.currentTime)
 }
 
+function startLayerDrag(id: string, event: DragEvent) {
+  draggedLayerId.value = id
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', id)
+  }
+}
+
+function dropLayer(targetId: string) {
+  if (draggedLayerId.value) reorderLayer(draggedLayerId.value, targetId)
+  draggedLayerId.value = null
+}
+
+function onAssetSettingsChanged() {
+  currentFolderId.value = null
+  void loadLibrary()
+}
+
 onMounted(() => {
-  if (apiBase.value) void loadLibrary()
+  window.addEventListener('motionframe:asset-settings', onAssetSettingsChanged)
+  if (apiConfigured.value) void loadLibrary()
 })
+
+onBeforeUnmount(() => window.removeEventListener('motionframe:asset-settings', onAssetSettingsChanged))
 </script>
 
 <template>
@@ -136,14 +155,8 @@ onMounted(() => {
 
     <div v-if="tab === 'assets'" class="panel-scroll asset-panel">
       <div class="asset-api-head">
-        <div><strong>素材库</strong><small>{{ apiBase ? '远程 API + 本地缓存' : '尚未连接素材接口' }}</small></div>
-        <button @click="showApiSettings = !showApiSettings">设置</button>
-      </div>
-
-      <div v-if="showApiSettings" class="asset-api-settings">
-        <label><span>API 地址</span><input v-model="apiBase" placeholder="https://nas.example.com" /></label>
-        <label><span>访问令牌</span><input v-model="apiToken" type="password" placeholder="可选 Bearer Token" /></label>
-        <button @click="saveApiSettings">保存并连接</button>
+        <div><strong>素材库</strong><small>{{ apiConfigured ? '远程 API + 本地缓存' : '请在右上角设置素材服务器' }}</small></div>
+        <span class="server-state" :class="{ connected: apiConfigured }">{{ apiConfigured ? '已连接' : '未设置' }}</span>
       </div>
 
       <input ref="fileInput" hidden multiple type="file" accept="image/*,video/*" @change="onUploadChange" />
@@ -168,6 +181,7 @@ onMounted(() => {
 
       <div class="section-label">远程素材</div>
       <div v-if="loadingAssets" class="asset-empty">正在读取素材库…</div>
+      <div v-else-if="!apiConfigured" class="asset-empty">点击右上角齿轮设置图片服务器</div>
       <div v-else-if="!assets.length" class="asset-empty">当前文件夹暂无素材</div>
       <div v-else class="asset-grid remote-asset-grid">
         <button v-for="asset in assets" :key="asset.id" class="asset-card remote-asset-card" @click="addAsset(asset)">
@@ -200,16 +214,8 @@ onMounted(() => {
         <span>{{ editorStore.project.scenes.length }} 个场景 · {{ totalDuration.toFixed(1) }}s</span>
         <small>列表顺序就是最终视频顺序，场景结束后自动进入下一场景。</small>
       </div>
-      <div
-        v-for="(scene, index) in editorStore.project.scenes"
-        :key="scene.id"
-        class="scene-row-wrap"
-      >
-        <button
-          class="scene-row"
-          :class="{ active: scene.id === editorStore.project.currentSceneId }"
-          @click="editorStore.switchScene(scene.id)"
-        >
+      <div v-for="(scene, index) in editorStore.project.scenes" :key="scene.id" class="scene-row-wrap">
+        <button class="scene-row" :class="{ active: scene.id === editorStore.project.currentSceneId }" @click="editorStore.switchScene(scene.id)">
           <span class="scene-index">{{ index + 1 }}</span>
           <span class="scene-copy"><strong>{{ scene.name }}</strong><small>{{ scene.elements.length }} 个元素</small></span>
           <span class="scene-duration">{{ scene.duration.toFixed(1) }}s</span>
@@ -231,19 +237,20 @@ onMounted(() => {
     </div>
 
     <div v-else class="panel-scroll layer-panel">
-      <div class="layer-order-toolbar">
-        <button @click="moveSelectedLayer('bottom')">置底</button>
-        <button @click="moveSelectedLayer('down')">下移</button>
-        <button @click="moveSelectedLayer('up')">上移</button>
-        <button @click="moveSelectedLayer('top')">置顶</button>
-      </div>
+      <div class="layer-drag-tip">拖动图层行调整层级，上方图层显示在最前面。</div>
       <button
-        v-for="element in [...editorStore.currentScene.value.elements].sort((a,b) => b.z-a.z)"
+        v-for="element in orderedLayers"
         :key="element.id"
         class="layer-row"
-        :class="{ active: element.id === editorStore.selectedId.value }"
+        :class="{ active: element.id === editorStore.selectedId.value, dragging: element.id === draggedLayerId }"
+        draggable="true"
+        @dragstart="startLayerDrag(element.id, $event)"
+        @dragover.prevent
+        @drop.prevent="dropLayer(element.id)"
+        @dragend="draggedLayerId = null"
         @click="editorStore.select(element.id)"
       >
+        <span class="layer-grip">⋮⋮</span>
         <span class="layer-eye" @click.stop="editorStore.commit(() => element.visible = !element.visible)">{{ element.visible ? '◉' : '○' }}</span>
         <span class="layer-type">{{ element.type === 'image' ? '图' : element.type === 'video' ? '视' : element.type === 'shape' ? '形' : '字' }}</span>
         <span class="layer-name">{{ element.name }}</span>
