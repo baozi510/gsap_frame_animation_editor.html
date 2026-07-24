@@ -10,8 +10,14 @@ export interface TimelineRenderer {
   renderNow?(): void
 }
 
+export interface TimelineCanvasSize {
+  width: number
+  height: number
+}
+
 export class TimelineEngine {
   private renderer: TimelineRenderer
+  private getCanvasSize: () => TimelineCanvasSize
   private scene: Scene | null = null
   private timeline: gsap.core.Timeline | null = null
   private states = new Map<string, RuntimeState>()
@@ -21,8 +27,9 @@ export class TimelineEngine {
   onTimeChange?: (time: number) => void
   onPlayingChange?: (playing: boolean) => void
 
-  constructor(renderer: TimelineRenderer) {
+  constructor(renderer: TimelineRenderer, getCanvasSize: () => TimelineCanvasSize) {
     this.renderer = renderer
+    this.getCanvasSize = getCanvasSize
   }
 
   compile(scene: Scene, keepTime = true) {
@@ -84,19 +91,19 @@ export class TimelineEngine {
     const duration = Math.max(0.01, end - start)
 
     if (clip.phase === 'enter') {
-      timeline.set(state, { ...this.effectState(clip, base, 'enter'), visible: element.visible }, start)
+      timeline.set(state, { ...this.effectState(clip, base, element, 'enter'), visible: element.visible }, start)
       timeline.to(state, { ...base, visible: element.visible, duration, ease: clip.ease }, start)
       return
     }
 
     if (clip.phase === 'exit') {
       timeline.set(state, { ...base, visible: element.visible }, start)
-      timeline.to(state, { ...this.effectState(clip, base, 'exit'), duration, ease: clip.ease }, start)
+      timeline.to(state, { ...this.effectState(clip, base, element, 'exit'), duration, ease: clip.ease }, start)
       timeline.set(state, { visible: false }, end)
       return
     }
 
-    this.addHoldClip(timeline, state, clip, base, start, duration)
+    this.addHoldClip(timeline, state, clip, base, element, start, duration)
   }
 
   private baseState(element: EditorElement): RuntimeState {
@@ -111,21 +118,54 @@ export class TimelineEngine {
     }
   }
 
-  private effectState(clip: AnimationClip, base: RuntimeState, phase: 'enter' | 'exit'): RuntimeState {
-    const distance = (clip.intensity || 100) / 100
+  private effectState(
+    clip: AnimationClip,
+    base: RuntimeState,
+    element: EditorElement,
+    phase: 'enter' | 'exit',
+  ): RuntimeState {
+    const percent = Math.max(0, Number(clip.intensity ?? 100)) / 100
+    const visibilityPercent = Math.min(1, percent)
     const state = { ...base }
+    const canvas = this.getCanvasSize()
+    const interpolate = (from: number, target: number) => from + (target - from) * percent
+
     switch (clip.preset) {
-      case 'fade': state.alpha = 0; break
-      case 'left': state.x -= 420 * distance; break
-      case 'right': state.x += 420 * distance; break
-      case 'up': state.y += phase === 'enter' ? 360 * distance : -360 * distance; break
-      case 'down': state.y += phase === 'enter' ? -360 * distance : 360 * distance; break
-      case 'pop': state.scaleX = state.scaleY = Math.max(0.05, 1 - 0.8 * distance); state.alpha = 0; break
-      case 'zoom': state.scaleX = state.scaleY = 1 + (phase === 'enter' ? 0.55 : 0.65) * distance; state.alpha = 0; break
+      case 'fade':
+        state.alpha = base.alpha * (1 - visibilityPercent)
+        break
+      case 'left':
+        state.x = interpolate(base.x, -element.width / 2)
+        break
+      case 'right':
+        state.x = interpolate(base.x, canvas.width + element.width / 2)
+        break
+      case 'up': {
+        const targetY = phase === 'enter'
+          ? canvas.height + element.height / 2
+          : -element.height / 2
+        state.y = interpolate(base.y, targetY)
+        break
+      }
+      case 'down': {
+        const targetY = phase === 'enter'
+          ? -element.height / 2
+          : canvas.height + element.height / 2
+        state.y = interpolate(base.y, targetY)
+        break
+      }
+      case 'pop':
+        state.scaleX = state.scaleY = Math.max(0.02, 1 - 0.8 * percent)
+        state.alpha = base.alpha * (1 - visibilityPercent)
+        break
+      case 'zoom':
+        state.scaleX = state.scaleY = 1 + (phase === 'enter' ? 0.55 : 0.65) * percent
+        state.alpha = base.alpha * (1 - visibilityPercent)
+        break
       case 'rotate':
-        state.rotation += (phase === 'enter' ? -180 : 180) * distance
-        state.scaleX = state.scaleY = phase === 'enter' ? 0.45 : 0.4
-        state.alpha = 0
+        state.rotation += (phase === 'enter' ? -180 : 180) * percent
+        state.scaleX = state.scaleY = Math.max(0.05, 1 - 0.55 * visibilityPercent)
+        state.alpha = base.alpha * (1 - visibilityPercent)
         break
     }
     return state
@@ -136,13 +176,14 @@ export class TimelineEngine {
     state: RuntimeState,
     clip: AnimationClip,
     base: RuntimeState,
+    element: EditorElement,
     start: number,
     duration: number,
   ) {
-    const strength = clip.intensity || 0
+    const percent = Math.max(0, Number(clip.intensity ?? 0)) / 100
     if (clip.preset === 'float') {
       timeline.to(state, {
-        y: base.y - strength,
+        y: base.y - element.height * 0.25 * percent,
         duration: Math.min(0.8, duration / 2),
         ease: clip.ease,
         repeat: Math.max(1, Math.floor(duration / Math.min(1.6, duration)) * 2 - 1),
@@ -151,8 +192,8 @@ export class TimelineEngine {
     }
     if (clip.preset === 'pulse') {
       timeline.to(state, {
-        scaleX: 1 + strength / 100,
-        scaleY: 1 + strength / 100,
+        scaleX: 1 + 0.2 * percent,
+        scaleY: 1 + 0.2 * percent,
         duration: Math.min(0.65, duration / 2),
         ease: clip.ease,
         repeat: Math.max(1, Math.floor(duration / Math.min(1.3, duration)) * 2 - 1),
@@ -161,7 +202,7 @@ export class TimelineEngine {
     }
     if (clip.preset === 'swing') {
       timeline.to(state, {
-        rotation: base.rotation + strength,
+        rotation: base.rotation + 15 * percent,
         duration: Math.min(0.55, duration / 2),
         ease: clip.ease,
         repeat: Math.max(1, Math.floor(duration / Math.min(1.1, duration)) * 2 - 1),
@@ -170,7 +211,7 @@ export class TimelineEngine {
     }
     if (clip.preset === 'shake') {
       timeline.to(state, {
-        x: base.x - strength,
+        x: base.x - element.width * 0.08 * percent,
         duration: Math.min(0.08, duration / 2),
         ease: 'none',
         repeat: Math.max(1, Math.floor(duration / Math.min(0.16, duration)) * 2 - 1),
@@ -179,8 +220,8 @@ export class TimelineEngine {
     }
     if (clip.preset === 'zoom') {
       timeline.to(state, {
-        scaleX: 1 + strength / 100,
-        scaleY: 1 + strength / 100,
+        scaleX: 1 + 0.25 * percent,
+        scaleY: 1 + 0.25 * percent,
         duration,
         ease: clip.ease,
         yoyo: true,
