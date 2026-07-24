@@ -20,6 +20,7 @@ export class TimelineEngine {
   private getCanvasSize: () => TimelineCanvasSize
   private scene: Scene | null = null
   private timeline: gsap.core.Timeline | null = null
+  private previewTween: gsap.core.Tween | null = null
   private states = new Map<string, RuntimeState>()
   time = 0
   playing = false
@@ -34,9 +35,11 @@ export class TimelineEngine {
 
   compile(scene: Scene, keepTime = true) {
     const previousTime = keepTime ? this.time : 0
+    this.stopPreview(false)
     this.timeline?.kill()
     this.scene = scene
     this.states.clear()
+    this.setPlaying(false)
 
     const timeline = gsap.timeline({
       paused: true,
@@ -68,10 +71,17 @@ export class TimelineEngine {
     const state: RuntimeState = { ...base, visible: false }
     this.states.set(element.id, state)
 
-    const elementStart = clamp(element.start, 0, this.scene?.duration ?? element.start)
-    const elementEnd = clamp(element.start + element.duration, elementStart, this.scene?.duration ?? element.start + element.duration)
+    const sceneDuration = this.scene?.duration ?? element.start + element.duration
+    const elementStart = clamp(element.start, 0, sceneDuration)
+    const elementEnd = clamp(element.start + element.duration, elementStart, sceneDuration)
     timeline.set(state, { ...base, visible: element.visible }, elementStart)
-    timeline.set(state, { visible: false }, elementEnd)
+
+    // A clip ending before the scene should disappear at its own end. When it
+    // reaches the scene boundary, keep the final frame visible unless an
+    // explicit exit animation hides it.
+    if (elementEnd < sceneDuration - 0.0001) {
+      timeline.set(state, { visible: false }, elementEnd)
+    }
 
     const clips = [...element.animations].sort((a, b) => a.offset - b.offset)
     clips.forEach((clip) => this.addAnimationClip(timeline, state, element, base, clip, elementStart, elementEnd))
@@ -171,6 +181,17 @@ export class TimelineEngine {
     return state
   }
 
+  private automaticHoldCycles(clip: AnimationClip, duration: number) {
+    const cycleSeconds: Record<string, number> = {
+      float: 1.6,
+      pulse: 1.3,
+      swing: 1.1,
+      shake: 0.16,
+      zoom: 1.6,
+    }
+    return clamp(Math.round(duration / (cycleSeconds[clip.preset] ?? 1.2)), 1, 100)
+  }
+
   private addHoldClip(
     timeline: gsap.core.Timeline,
     state: RuntimeState,
@@ -181,51 +202,49 @@ export class TimelineEngine {
     duration: number,
   ) {
     const percent = Math.max(0, Number(clip.intensity ?? 0)) / 100
+    const cycles = clip.loop === false
+      ? clamp(Math.round(Number(clip.iterations ?? 1)), 1, 50)
+      : this.automaticHoldCycles(clip, duration)
+    const halfCycleDuration = Math.max(0.001, duration / (cycles * 2))
+    const repeat = cycles * 2 - 1
+    const common = {
+      duration: halfCycleDuration,
+      ease: clip.ease,
+      repeat,
+      yoyo: true,
+    }
+
     if (clip.preset === 'float') {
       timeline.to(state, {
         y: base.y - element.height * 0.25 * percent,
-        duration: Math.min(0.8, duration / 2),
-        ease: clip.ease,
-        repeat: Math.max(1, Math.floor(duration / Math.min(1.6, duration)) * 2 - 1),
-        yoyo: true,
+        ...common,
       }, start)
     }
     if (clip.preset === 'pulse') {
       timeline.to(state, {
         scaleX: 1 + 0.2 * percent,
         scaleY: 1 + 0.2 * percent,
-        duration: Math.min(0.65, duration / 2),
-        ease: clip.ease,
-        repeat: Math.max(1, Math.floor(duration / Math.min(1.3, duration)) * 2 - 1),
-        yoyo: true,
+        ...common,
       }, start)
     }
     if (clip.preset === 'swing') {
       timeline.to(state, {
         rotation: base.rotation + 15 * percent,
-        duration: Math.min(0.55, duration / 2),
-        ease: clip.ease,
-        repeat: Math.max(1, Math.floor(duration / Math.min(1.1, duration)) * 2 - 1),
-        yoyo: true,
+        ...common,
       }, start)
     }
     if (clip.preset === 'shake') {
       timeline.to(state, {
         x: base.x - element.width * 0.08 * percent,
-        duration: Math.min(0.08, duration / 2),
+        ...common,
         ease: 'none',
-        repeat: Math.max(1, Math.floor(duration / Math.min(0.16, duration)) * 2 - 1),
-        yoyo: true,
       }, start)
     }
     if (clip.preset === 'zoom') {
       timeline.to(state, {
         scaleX: 1 + 0.25 * percent,
         scaleY: 1 + 0.25 * percent,
-        duration,
-        ease: clip.ease,
-        yoyo: true,
-        repeat: 1,
+        ...common,
       }, start)
     }
     timeline.set(state, base, start + duration)
@@ -233,6 +252,7 @@ export class TimelineEngine {
 
   seek(time: number) {
     if (!this.scene || !this.timeline) return
+    this.stopPreview(false)
     this.time = clamp(time, 0, this.scene.duration)
     this.timeline.pause().seek(this.time, false)
     this.renderer.applyRuntime(this.states)
@@ -250,6 +270,7 @@ export class TimelineEngine {
 
   play() {
     if (!this.timeline || !this.scene) return
+    this.stopPreview(false)
     if (this.time >= this.scene.duration - 0.001) this.seek(0)
     this.renderer.setControlsVisible?.(false)
     this.timeline.play()
@@ -257,6 +278,7 @@ export class TimelineEngine {
   }
 
   pause() {
+    this.stopPreview(false)
     this.timeline?.pause()
     this.renderer.setControlsVisible?.(true)
     this.setPlaying(false)
@@ -272,20 +294,30 @@ export class TimelineEngine {
     const clip = element.animations.find((item) => item.phase === phase)
     if (!clip) return
     const start = element.start + clip.offset
-    const end = start + clip.duration
+    const end = Math.min(element.start + element.duration, start + clip.duration)
+    if (end <= start) return
+
+    this.stopPreview(false)
     this.renderer.setControlsVisible?.(false)
     this.timeline.pause().seek(start, false)
-    this.timeline.tweenFromTo(start, end, {
-      onUpdate: () => this.renderer.setMediaTime?.(this.timeline?.time() ?? start),
-      onComplete: () => {
-        this.renderer.setControlsVisible?.(true)
-        this.seek(end)
-      },
+    this.previewTween = this.timeline.tweenFromTo(start, end, {
+      ease: 'none',
+      repeat: -1,
+      onRepeat: () => this.renderer.setMediaTime?.(start),
     })
     this.setPlaying(true)
   }
 
+  private stopPreview(showControls = true) {
+    if (!this.previewTween) return
+    this.previewTween.kill()
+    this.previewTween = null
+    this.timeline?.pause()
+    if (showControls) this.renderer.setControlsVisible?.(true)
+  }
+
   destroy() {
+    this.stopPreview(false)
     this.timeline?.kill()
     this.timeline = null
     this.states.clear()
