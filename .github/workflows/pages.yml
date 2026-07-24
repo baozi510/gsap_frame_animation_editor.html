@@ -32,7 +32,25 @@ jobs:
         run: npm install
 
       - name: Build
-        run: npm run build
+        id: app-build
+        continue-on-error: true
+        run: npm run build > build.log 2>&1
+
+      - name: Upload validation files
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-validation
+          path: |
+            build.log
+            dist
+          if-no-files-found: warn
+
+      - name: Report build failure
+        if: steps.app-build.outcome == 'failure'
+        run: |
+          tail -n 120 build.log
+          exit 1
 
       - name: Configure Pages
         if: github.event_name != 'pull_request'
