@@ -4,7 +4,6 @@ import { editorStore } from '@/store/editorStore'
 import type { AnimationClip, AnimationPhase, EditorElement } from '@/types/editor'
 import { clamp, uid } from '@/utils/helpers'
 import {
-  alignSelected,
   getSceneContentEnd,
   refreshSceneDuration,
   setSceneAutoDuration,
@@ -205,18 +204,6 @@ function updateClip(mutator: (clip: AnimationClip, element: EditorElement) => vo
         </section>
 
         <section class="inspector-section">
-          <header><strong>对齐到画布</strong><small>Photoshop 式</small></header>
-          <div class="align-grid">
-            <button title="左对齐" @click="alignSelected('left')">左</button>
-            <button title="水平居中" @click="alignSelected('hcenter')">水平中</button>
-            <button title="右对齐" @click="alignSelected('right')">右</button>
-            <button title="上对齐" @click="alignSelected('top')">上</button>
-            <button title="垂直居中" @click="alignSelected('vcenter')">垂直中</button>
-            <button title="下对齐" @click="alignSelected('bottom')">下</button>
-          </div>
-        </section>
-
-        <section class="inspector-section">
           <header><strong>时间范围</strong><small>独立于动画</small></header>
           <label class="field-row"><span>开始时间</span><input type="number" min="0" :max="editorStore.currentScene.value.duration" step="0.05" :value="selected.start" @change="updateNumber('start', eventValue($event))" /></label>
           <label class="field-row"><span>显示时长</span><input type="number" min="0.1" :max="editorStore.currentScene.value.duration - selected.start" step="0.05" :value="selected.duration" @change="updateNumber('duration', eventValue($event))" /></label>
@@ -272,7 +259,8 @@ function updateClip(mutator: (clip: AnimationClip, element: EditorElement) => vo
           </div>
           <label class="field-row"><span>相对开始</span><input type="number" min="0" :max="selected.duration" step="0.05" :value="selectedClip.offset" @change="updateClip(clip => clip.offset = eventNumber($event))" /></label>
           <label class="field-row"><span>持续时间</span><input type="number" min="0.05" :max="selected.duration" step="0.05" :value="selectedClip.duration" @change="updateClip(clip => clip.duration = eventNumber($event))" /></label>
-          <label class="field-row range-with-value"><span>效果力度</span><input type="range" min="0" max="160" step="1" :value="selectedClip.intensity" @input="updateClip(clip => clip.intensity = eventNumber($event))" /><output>{{ Math.round(selectedClip.intensity) }}</output></label>
+          <label class="field-row range-with-value"><span>效果强度</span><input type="range" min="0" max="200" step="1" :value="selectedClip.intensity" @input="updateClip(clip => clip.intensity = eventNumber($event))" /><output>{{ Math.round(selectedClip.intensity) }}%</output></label>
+          <p class="field-help animation-strength-help">位移动画 100% 表示元素完全位于画布外，超过 100% 会继续远离画布。</p>
           <label class="field-row"><span>缓动曲线</span><select :value="selectedClip.ease" @change="updateClip(clip => clip.ease = eventValue($event))"><option v-for="ease in eases" :key="ease" :value="ease">{{ ease }}</option></select></label>
           <button class="remove-animation" @click="removeAnimation">删除这个动画</button>
         </section>
