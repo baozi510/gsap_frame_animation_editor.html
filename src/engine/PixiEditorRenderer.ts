@@ -11,11 +11,14 @@ import {
   type FederatedPointerEvent,
 } from 'pixi.js'
 import type { EditorElement, Project, RuntimeState, Scene } from '@/types/editor'
-import { degrees, radians } from '@/utils/helpers'
+import { resolveAssetSource } from '@/services/assets'
+import { clamp, degrees, radians } from '@/utils/helpers'
 
 interface RenderNode {
   container: Container
   visual: Sprite | Graphics | Text
+  video?: HTMLVideoElement
+  elementId: string
 }
 
 interface DragState {
@@ -32,6 +35,7 @@ export interface RendererCallbacks {
   onTransformStart?: () => string
   onTransformLive?: (id: string, updater: (element: EditorElement) => void) => void
   onTransformEnd?: (before: string) => void
+  onAssetError?: (message: string) => void
 }
 
 export class PixiEditorRenderer {
@@ -90,6 +94,13 @@ export class PixiEditorRenderer {
     if (!this.app) return
     const token = ++this.renderToken
     this.sceneLayer.removeChildren().forEach((child) => child.destroy({ children: true }))
+    this.nodes.forEach((node) => {
+      if (node.video) {
+        node.video.pause()
+        node.video.removeAttribute('src')
+        node.video.load()
+      }
+    })
     this.nodes.clear()
     this.app.renderer.background.color = this.getScene().background
     const elements = [...this.getScene().elements].sort((a, b) => a.z - b.z)
@@ -103,6 +114,36 @@ export class PixiEditorRenderer {
     this.renderNow()
   }
 
+  private async resolveElementSource(element: EditorElement) {
+    if (!element.assetId) return element.src
+    const asset = this.project.assets.find((item) => item.id === element.assetId)
+    if (!asset) throw new Error(`项目缺少素材信息：${element.name}`)
+    return resolveAssetSource(asset, element.src)
+  }
+
+  private async createVideo(source: string) {
+    const video = document.createElement('video')
+    video.src = source
+    video.muted = true
+    video.playsInline = true
+    video.preload = 'auto'
+    video.crossOrigin = 'anonymous'
+    await new Promise<void>((resolve, reject) => {
+      const timer = window.setTimeout(() => reject(new Error('视频素材加载超时')), 15000)
+      video.addEventListener('loadeddata', () => {
+        window.clearTimeout(timer)
+        resolve()
+      }, { once: true })
+      video.addEventListener('error', () => {
+        window.clearTimeout(timer)
+        reject(new Error('视频素材无法加载'))
+      }, { once: true })
+      video.load()
+    })
+    video.pause()
+    return video
+  }
+
   private async createNode(element: EditorElement): Promise<RenderNode> {
     const container = new Container()
     container.label = element.id
@@ -111,14 +152,24 @@ export class PixiEditorRenderer {
     container.hitArea = new Rectangle(-element.width / 2, -element.height / 2, element.width, element.height)
 
     let visual: Sprite | Graphics | Text
-    if (element.type === 'image') {
+    let video: HTMLVideoElement | undefined
+    if (element.type === 'image' || element.type === 'video') {
       let texture = Texture.WHITE
-      if (element.src) {
-        try {
-          texture = await Assets.load(element.src)
-        } catch {
-          texture = Texture.WHITE
+      try {
+        const source = await this.resolveElementSource(element)
+        if (source) {
+          if (element.type === 'video') {
+            video = await this.createVideo(source)
+            texture = Texture.from(video)
+          } else {
+            texture = await Assets.load(source)
+          }
         }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : `素材加载失败：${element.name}`
+        console.error(error)
+        this.callbacks.onAssetError?.(message)
+        texture = Texture.WHITE
       }
       const sprite = new Sprite(texture)
       sprite.anchor.set(0.5)
@@ -149,7 +200,7 @@ export class PixiEditorRenderer {
     this.applyBase(container, element)
     container.visible = element.visible
     container.on('pointerdown', (event) => this.beginMove(event, element.id))
-    return { container, visual }
+    return { container, visual, video, elementId: element.id }
   }
 
   private createShape(element: EditorElement) {
@@ -295,13 +346,45 @@ export class PixiEditorRenderer {
       node.container.alpha = state.alpha
       node.container.visible = state.visible
     })
+    this.updateSelection()
+  }
+
+  setMediaTime(time: number) {
+    this.nodes.forEach((node, id) => {
+      if (!node.video) return
+      const element = this.getScene().elements.find((item) => item.id === id)
+      if (!element) return
+      const localTime = clamp(time - element.start, 0, Math.max(0, Math.min(element.duration, node.video.duration || element.duration)))
+      if (Math.abs(node.video.currentTime - localTime) > 0.08) node.video.currentTime = localTime
+      node.video.pause()
+    })
+  }
+
+  async prepareFrame(time: number) {
+    const tasks: Promise<void>[] = []
+    this.nodes.forEach((node, id) => {
+      if (!node.video) return
+      const element = this.getScene().elements.find((item) => item.id === id)
+      if (!element) return
+      const target = clamp(time - element.start, 0, Math.max(0, Math.min(element.duration, node.video.duration || element.duration)))
+      if (Math.abs(node.video.currentTime - target) < 0.01) return
+      tasks.push(new Promise<void>((resolve) => {
+        const timer = window.setTimeout(resolve, 1200)
+        node.video!.addEventListener('seeked', () => {
+          window.clearTimeout(timer)
+          resolve()
+        }, { once: true })
+        node.video!.currentTime = target
+      }))
+    })
+    await Promise.all(tasks)
   }
 
   updateSelection() {
     const selectedId = this.getSelectedId()
     const element = this.getScene().elements.find((item) => item.id === selectedId)
     const node = selectedId ? this.nodes.get(selectedId) : null
-    if (!element || !node || !element.visible) {
+    if (!element || !node || !element.visible || !node.container.visible) {
       this.selection.visible = false
       this.renderNow()
       return
@@ -327,6 +410,11 @@ export class PixiEditorRenderer {
   }
 
   destroy() {
+    this.nodes.forEach((node) => {
+      node.video?.pause()
+      node.video?.removeAttribute('src')
+      node.video?.load()
+    })
     this.app?.destroy(true, { children: true })
     this.app = null
     this.nodes.clear()
