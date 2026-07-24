@@ -21,11 +21,36 @@ function animationClip(
   ease: string,
   intensity: number,
 ): AnimationClip {
-  return { id: uid('anim'), phase, offset, duration, preset, ease, intensity }
+  return {
+    id: uid('anim'),
+    phase,
+    offset,
+    duration,
+    preset,
+    ease,
+    intensity,
+    ...(phase === 'hold' ? { iterations: 2, loop: true } : {}),
+  }
 }
 
 function defaultElementDuration(sceneDuration: number, atTime: number) {
   return clamp(sceneDuration - atTime, 0.5, 3)
+}
+
+function getSceneContentEnd(scene: Scene) {
+  return scene.elements.reduce((end, element) => Math.max(end, element.start + element.duration), 0)
+}
+
+function refreshAutoSceneDuration(scene: Scene) {
+  if (scene.autoDuration === false) return
+  scene.duration = Math.max(0.5, getSceneContentEnd(scene) + Math.max(0, Number(scene.durationOffset ?? 0)))
+}
+
+function elementStart(scene: Scene, atTime: number) {
+  const upper = scene.autoDuration === false
+    ? Math.max(0, scene.duration - 0.1)
+    : Math.max(0, scene.duration)
+  return clamp(atTime, 0, upper)
 }
 
 export function makeImage(
@@ -200,6 +225,8 @@ function defaultProject(): Project {
       id: 'scene_1',
       name: '产品展示',
       duration: 5,
+      autoDuration: true,
+      durationOffset: 0,
       background: '#ece9e4',
       elements: [background, glass, product, title, subtitle, card, badge],
     }],
@@ -218,9 +245,7 @@ function legacyAnimations(element: Record<string, unknown>) {
 
   if (enter && enterDuration > 0) {
     animations.push(animationClip(
-      'enter',
-      0,
-      enterDuration,
+      'enter', 0, enterDuration,
       String(enter.preset ?? 'fade') as AnimationClip['preset'],
       String(enter.ease ?? 'power2.out'),
       Number(enter.intensity ?? 100),
@@ -228,9 +253,7 @@ function legacyAnimations(element: Record<string, unknown>) {
   }
   if (hold && holdDuration > 0 && hold.preset !== 'none') {
     animations.push(animationClip(
-      'hold',
-      enterDuration,
-      holdDuration,
+      'hold', enterDuration, holdDuration,
       String(hold.preset ?? 'float') as AnimationClip['preset'],
       String(hold.ease ?? 'sine.inOut'),
       Number(hold.intensity ?? 18),
@@ -238,9 +261,7 @@ function legacyAnimations(element: Record<string, unknown>) {
   }
   if (exit && exitDuration > 0) {
     animations.push(animationClip(
-      'exit',
-      Math.max(0, duration - exitDuration),
-      exitDuration,
+      'exit', Math.max(0, duration - exitDuration), exitDuration,
       String(exit.preset ?? 'fade') as AnimationClip['preset'],
       String(exit.ease ?? 'power2.in'),
       Number(exit.intensity ?? 100),
@@ -256,15 +277,20 @@ function normalizeElement(raw: Record<string, unknown>, sceneDuration: number): 
   const animations = Array.isArray(raw.animations)
     ? raw.animations.map((item) => {
       const clip = item as Partial<AnimationClip>
+      const phase = clip.phase ?? 'hold'
       const clipDuration = clamp(Number(clip.duration ?? 0.5), 0.05, duration)
       return {
         id: clip.id || uid('anim'),
-        phase: clip.phase ?? 'hold',
+        phase,
         offset: clamp(Number(clip.offset ?? 0), 0, Math.max(0, duration - clipDuration)),
         duration: clipDuration,
         preset: clip.preset ?? 'fade',
         ease: clip.ease ?? 'power2.out',
         intensity: Number(clip.intensity ?? 100),
+        ...(phase === 'hold' ? {
+          iterations: clamp(Math.round(Number(clip.iterations ?? 2)), 1, 50),
+          loop: clip.loop !== false,
+        } : {}),
       } satisfies AnimationClip
     })
     : legacy.animations
@@ -304,15 +330,27 @@ export function normalizeProject(rawProject: Project | Record<string, unknown>):
     const elements = Array.isArray(scene.elements)
       ? scene.elements.map((element) => normalizeElement(element as Record<string, unknown>, duration))
       : []
-    return {
+    const normalized: Scene = {
       id: String(scene.id ?? uid('scene')),
       name: String(scene.name ?? `场景 ${index + 1}`),
       duration,
+      autoDuration: scene.autoDuration !== false,
+      durationOffset: Math.max(0, Number(scene.durationOffset ?? 0)),
       background: String(scene.background ?? '#eef0f4'),
       elements,
     }
+    refreshAutoSceneDuration(normalized)
+    return normalized
   })
-  if (!scenes.length) scenes.push({ id: uid('scene'), name: '场景 1', duration: 5, background: '#eef0f4', elements: [] })
+  if (!scenes.length) scenes.push({
+    id: uid('scene'),
+    name: '场景 1',
+    duration: 0.5,
+    autoDuration: true,
+    durationOffset: 0,
+    background: '#eef0f4',
+    elements: [],
+  })
 
   const assets = Array.isArray(raw.assets) ? raw.assets as ProjectAsset[] : []
   const currentSceneId = scenes.some((scene) => scene.id === raw.currentSceneId)
@@ -431,23 +469,26 @@ function nextZ() {
 function addDemoAsset(assetId: string, atTime = 0) {
   const asset = demoAssets.find((item) => item.id === assetId)
   if (!asset) return
-  const start = clamp(atTime, 0, currentScene.value.duration - 0.1)
-  const duration = defaultElementDuration(currentScene.value.duration, start)
+  const scene = currentScene.value
+  const start = elementStart(scene, atTime)
+  const duration = defaultElementDuration(scene.duration, start)
   const isBackground = asset.id === 'room'
   const width = isBackground ? project.width : Math.min(700, project.width * 0.72)
   const height = isBackground ? project.height : Math.min(520, project.height * 0.38)
-  const element = makeImage(asset.name, asset.src, project.width / 2, project.height / 2, width, height, nextZ(), start, isBackground ? currentScene.value.duration - start : duration)
+  const element = makeImage(asset.name, asset.src, project.width / 2, project.height / 2, width, height, nextZ(), start, isBackground ? Math.max(0.5, scene.duration - start) : duration)
   commit(() => {
-    currentScene.value.elements.push(element)
+    scene.elements.push(element)
+    refreshAutoSceneDuration(scene)
     selectedId.value = element.id
   }, '素材已加入画布')
 }
 
 function addShape(kind: 'rect' | 'circle' | 'text' | 'star', atTime = 0) {
+  const scene = currentScene.value
   const x = project.width / 2
   const y = project.height / 2
-  const start = clamp(atTime, 0, currentScene.value.duration - 0.1)
-  const duration = defaultElementDuration(currentScene.value.duration, start)
+  const start = elementStart(scene, atTime)
+  const duration = defaultElementDuration(scene.duration, start)
   let element: EditorElement
   if (kind === 'rect') element = makeShape('矩形色块', x, y, 420, 250, '#7a61ff', nextZ(), start, duration)
   else if (kind === 'circle') {
@@ -459,7 +500,8 @@ function addShape(kind: 'rect' | 'circle' | 'text' | 'star', atTime = 0) {
     element.style.fontSize = 200
   } else element = makeText('基础文字', '输入文字', x, y, 650, 130, nextZ(), start, duration)
   commit(() => {
-    currentScene.value.elements.push(element)
+    scene.elements.push(element)
+    refreshAutoSceneDuration(scene)
     selectedId.value = element.id
   }, '挂件已添加')
 }
@@ -471,10 +513,14 @@ function upsertProjectAsset(asset: ProjectAsset) {
 }
 
 function addLibraryAsset(asset: ProjectAsset, atTime = 0) {
-  const start = clamp(atTime, 0, currentScene.value.duration - 0.1)
-  const visibleDuration = asset.type === 'video' && asset.duration
-    ? clamp(asset.duration, 0.1, currentScene.value.duration - start)
-    : defaultElementDuration(currentScene.value.duration, start)
+  const scene = currentScene.value
+  const start = elementStart(scene, atTime)
+  const sourceDuration = asset.type === 'video' && asset.duration ? Math.max(0.1, asset.duration) : null
+  const visibleDuration = sourceDuration
+    ? scene.autoDuration === false
+      ? clamp(sourceDuration, 0.1, Math.max(0.1, scene.duration - start))
+      : sourceDuration
+    : defaultElementDuration(scene.duration, start)
   const maxWidth = project.width * 0.74
   const maxHeight = project.height * 0.58
   const sourceWidth = Math.max(1, asset.width || 640)
@@ -501,7 +547,8 @@ function addLibraryAsset(asset: ProjectAsset, atTime = 0) {
   }
   commit(() => {
     upsertProjectAsset(asset)
-    currentScene.value.elements.push(element)
+    scene.elements.push(element)
+    refreshAutoSceneDuration(scene)
     selectedId.value = element.id
   }, `${asset.type === 'video' ? '视频' : '图片'}素材已加入画布`)
 }
@@ -509,9 +556,11 @@ function addLibraryAsset(asset: ProjectAsset, atTime = 0) {
 function removeSelected() {
   if (!selectedId.value) return
   const id = selectedId.value
+  const scene = currentScene.value
   commit(() => {
-    currentScene.value.elements = currentScene.value.elements.filter((element) => element.id !== id)
-    selectedId.value = currentScene.value.elements.at(-1)?.id ?? null
+    scene.elements = scene.elements.filter((element) => element.id !== id)
+    refreshAutoSceneDuration(scene)
+    selectedId.value = scene.elements.at(-1)?.id ?? null
   }, '元素已删除')
 }
 
@@ -526,6 +575,7 @@ function duplicateSelected() {
   copy.z = nextZ()
   commit(() => {
     currentScene.value.elements.push(copy)
+    refreshAutoSceneDuration(currentScene.value)
     selectedId.value = copy.id
   }, '元素已复制')
 }
@@ -549,6 +599,7 @@ function updateElementLive(mutator: (element: EditorElement) => void) {
 }
 
 function finishLiveEdit(before: string) {
+  if (!before || before === JSON.stringify(serializeProject())) return
   history.value.push(before)
   if (history.value.length > 70) history.value.shift()
   future.value = []
@@ -564,7 +615,15 @@ function switchScene(id: string) {
 function addScene() {
   commit(() => {
     const id = uid('scene')
-    project.scenes.push({ id, name: `场景 ${project.scenes.length + 1}`, duration: 5, background: '#eef0f4', elements: [] })
+    project.scenes.push({
+      id,
+      name: `场景 ${project.scenes.length + 1}`,
+      duration: 0.5,
+      autoDuration: true,
+      durationOffset: 0,
+      background: '#eef0f4',
+      elements: [],
+    })
     project.currentSceneId = id
     selectedId.value = null
   }, '场景已添加')
@@ -599,14 +658,24 @@ function deleteScene() {
 }
 
 function changeRatio(width: number, height: number) {
-  const scaleX = width / project.width
-  const scaleY = height / project.height
+  const oldWidth = project.width
+  const oldHeight = project.height
+  const positionScaleX = width / oldWidth
+  const positionScaleY = height / oldHeight
+  const containScale = Math.min(positionScaleX, positionScaleY)
+  const coverScale = Math.max(positionScaleX, positionScaleY)
+
   commit(() => {
     project.scenes.forEach((scene) => scene.elements.forEach((element) => {
-      element.x *= scaleX
-      element.y *= scaleY
-      element.width *= scaleX
-      element.height *= scaleY
+      const fillsCanvas = Math.abs(element.x - oldWidth / 2) < 2
+        && Math.abs(element.y - oldHeight / 2) < 2
+        && Math.abs(element.width - oldWidth) < 2
+        && Math.abs(element.height - oldHeight) < 2
+      element.x *= positionScaleX
+      element.y *= positionScaleY
+      const scale = fillsCanvas ? coverScale : containScale
+      element.width *= scale
+      element.height *= scale
     }))
     project.width = width
     project.height = height

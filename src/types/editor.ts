@@ -29,6 +29,10 @@ export interface AnimationClip {
   preset: AnimationPreset
   ease: string
   intensity: number
+  /** Total emphasis cycles when loop is disabled. */
+  iterations?: number
+  /** For emphasis clips, automatically repeat throughout the clip duration. */
+  loop?: boolean
 }
 
 export interface ProjectAsset {
