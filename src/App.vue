@@ -1,5 +1,22 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+import {
+  AlignHorizontalJustifyCenter,
+  AlignHorizontalJustifyEnd,
+  AlignHorizontalJustifyStart,
+  AlignVerticalJustifyCenter,
+  AlignVerticalJustifyEnd,
+  AlignVerticalJustifyStart,
+  Copy,
+  Eraser,
+  Maximize2,
+  Redo2,
+  Settings,
+  Trash2,
+  Undo2,
+  ZoomIn,
+  ZoomOut,
+} from '@lucide/vue'
 import CanvasEditor from '@/components/CanvasEditor.vue'
 import LeftPanel from '@/components/LeftPanel.vue'
 import InspectorPanel from '@/components/InspectorPanel.vue'
@@ -146,8 +163,9 @@ onUnmounted(() => window.removeEventListener('keydown', keyboard))
       </div>
       <input v-model="editorStore.project.name" class="project-name" @change="editorStore.persist" />
       <div class="top-divider" />
-      <button class="icon-button" :disabled="!editorStore.history.value.length" title="撤销" @click="editorStore.undo">↶</button>
-      <button class="icon-button" :disabled="!editorStore.future.value.length" title="重做" @click="editorStore.redo">↷</button>
+      <button class="icon-button" :disabled="!editorStore.history.value.length" title="撤销" aria-label="撤销" @click="editorStore.undo"><Undo2 :size="17" /></button>
+      <button class="icon-button" :disabled="!editorStore.future.value.length" title="重做" aria-label="重做" @click="editorStore.redo"><Redo2 :size="17" /></button>
+
       <div class="ratio-group">
         <button
           v-for="ratio in ratios"
@@ -156,6 +174,31 @@ onUnmounted(() => window.removeEventListener('keydown', keyboard))
           @click="editorStore.changeRatio(ratio.width, ratio.height)"
         >{{ ratio.label }}</button>
       </div>
+
+      <div class="top-editor-tools" aria-label="画布工具">
+        <div class="top-icon-group" aria-label="对齐到画布">
+          <button class="compact-icon-button" :disabled="!editorStore.selectedElement.value" title="左对齐到画布" @click="alignSelected('left')"><AlignHorizontalJustifyStart :size="16" /></button>
+          <button class="compact-icon-button" :disabled="!editorStore.selectedElement.value" title="水平居中到画布" @click="alignSelected('hcenter')"><AlignHorizontalJustifyCenter :size="16" /></button>
+          <button class="compact-icon-button" :disabled="!editorStore.selectedElement.value" title="右对齐到画布" @click="alignSelected('right')"><AlignHorizontalJustifyEnd :size="16" /></button>
+          <button class="compact-icon-button" :disabled="!editorStore.selectedElement.value" title="上对齐到画布" @click="alignSelected('top')"><AlignVerticalJustifyStart :size="16" /></button>
+          <button class="compact-icon-button" :disabled="!editorStore.selectedElement.value" title="垂直居中到画布" @click="alignSelected('vcenter')"><AlignVerticalJustifyCenter :size="16" /></button>
+          <button class="compact-icon-button" :disabled="!editorStore.selectedElement.value" title="下对齐到画布" @click="alignSelected('bottom')"><AlignVerticalJustifyEnd :size="16" /></button>
+        </div>
+
+        <div class="top-icon-group">
+          <button class="compact-icon-button" :disabled="!editorStore.selectedElement.value" title="复制元素" @click="editorStore.duplicateSelected"><Copy :size="15" /></button>
+          <button class="compact-icon-button" :disabled="!editorStore.selectedElement.value" title="删除元素" @click="editorStore.removeSelected"><Trash2 :size="15" /></button>
+          <button class="compact-icon-button danger-icon-button" :disabled="!editorStore.currentScene.value.elements.length" title="清空当前画布" @click="clearCurrentScene"><Eraser :size="15" /></button>
+        </div>
+
+        <div class="top-icon-group top-zoom-group">
+          <button class="compact-icon-button" title="缩小画布" @click="setZoom(zoom / 1.12)"><ZoomOut :size="15" /></button>
+          <span>{{ Math.round(zoom * 100) }}%</span>
+          <button class="compact-icon-button" title="放大画布" @click="setZoom(zoom * 1.12)"><ZoomIn :size="15" /></button>
+          <button class="compact-icon-button" title="适配画布" @click="setZoom(1)"><Maximize2 :size="15" /></button>
+        </div>
+      </div>
+
       <div class="top-spacer" />
       <input ref="projectInput" hidden type="file" accept="application/json" @change="onProjectInputChange" />
       <button class="top-button" @click="projectInput?.click()">导入</button>
@@ -166,35 +209,13 @@ onUnmounted(() => window.removeEventListener('keydown', keyboard))
         :title="exportSupported === false ? '当前浏览器不支持 H.264 WebCodecs' : '按场景顺序导出完整 MP4'"
         @click="exportMp4"
       >导出完整 MP4</button>
-      <button class="settings-trigger" title="设置" aria-label="设置" @click="settingsOpen = true">⚙</button>
+      <button class="settings-trigger" title="设置" aria-label="设置" @click="settingsOpen = true"><Settings :size="17" /></button>
     </header>
 
     <section class="workspace">
       <LeftPanel :current-time="currentTime" />
 
       <section class="canvas-column">
-        <div class="canvas-toolbar">
-          <div class="toolbar-group alignment-toolbar">
-            <span class="toolbar-label">对齐到画布</span>
-            <button title="左对齐" @click="alignSelected('left')">左</button>
-            <button title="水平居中" @click="alignSelected('hcenter')">水平中</button>
-            <button title="右对齐" @click="alignSelected('right')">右</button>
-            <button title="上对齐" @click="alignSelected('top')">上</button>
-            <button title="垂直居中" @click="alignSelected('vcenter')">垂直中</button>
-            <button title="下对齐" @click="alignSelected('bottom')">下</button>
-          </div>
-          <div class="toolbar-group">
-            <button @click="editorStore.duplicateSelected">复制</button>
-            <button @click="editorStore.removeSelected">删除</button>
-            <button class="danger-toolbar" @click="clearCurrentScene">清空画布</button>
-          </div>
-          <div class="toolbar-group zoom-group">
-            <button @click="setZoom(zoom / 1.12)">－</button>
-            <span>{{ Math.round(zoom * 100) }}%</span>
-            <button @click="setZoom(zoom * 1.12)">＋</button>
-            <button @click="setZoom(1)">适配</button>
-          </div>
-        </div>
         <CanvasEditor
           ref="canvas"
           :zoom="zoom"
