@@ -31,8 +31,8 @@ const shellStyle = computed(() => {
 function updateFitScale() {
   if (!viewport.value) return
   const rect = viewport.value.getBoundingClientRect()
-  const maxWidth = Math.max(120, rect.width - 72)
-  const maxHeight = Math.max(120, rect.height - 72)
+  const maxWidth = Math.max(120, rect.width - 40)
+  const maxHeight = Math.max(120, rect.height - 40)
   fitScale.value = Math.min(maxWidth / editorStore.project.width, maxHeight / editorStore.project.height)
 }
 
@@ -52,7 +52,10 @@ async function initialize() {
     onAssetError: (message) => editorStore.notify(message),
   }
   await renderer.mount(host.value)
-  timeline = new TimelineEngine(renderer)
+  timeline = new TimelineEngine(renderer, () => ({
+    width: editorStore.project.width,
+    height: editorStore.project.height,
+  }))
   timeline.onTimeChange = (value) => emit('time', value)
   timeline.onPlayingChange = (value) => emit('playing', value)
   timeline.compile(editorStore.currentScene.value, false)
