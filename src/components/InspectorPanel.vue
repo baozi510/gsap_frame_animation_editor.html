@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
 import { editorStore } from '@/store/editorStore'
 import type { AnimationClip, AnimationPhase, EditorElement } from '@/types/editor'
 import { clamp, uid } from '@/utils/helpers'
@@ -18,6 +18,7 @@ const emit = defineEmits<{
 const tab = ref<'element' | 'animation' | 'scene'>('element')
 const animationPhase = ref<AnimationPhase>('enter')
 const animationPhases: AnimationPhase[] = ['enter', 'hold', 'exit']
+let previewTimer = 0
 
 const selected = computed(() => editorStore.selectedElement.value)
 const selectedClip = computed(() => selected.value?.animations.find((clip) => clip.phase === animationPhase.value) ?? null)
@@ -51,6 +52,20 @@ function eventValue(event: Event) {
 
 function eventNumber(event: Event) {
   return Number(eventValue(event))
+}
+
+function queuePreview(delay = 140) {
+  window.clearTimeout(previewTimer)
+  previewTimer = window.setTimeout(() => {
+    if (!selectedClip.value) return
+    emit('preview', animationPhase.value)
+  }, delay)
+}
+
+async function selectAnimationPhase(phase: AnimationPhase) {
+  animationPhase.value = phase
+  await nextTick()
+  if (selectedClip.value) queuePreview(30)
 }
 
 function topLeftValue(key: 'x' | 'y') {
@@ -112,7 +127,7 @@ function phaseLabel(phase: AnimationPhase) {
 
 function addAnimation() {
   if (!selected.value || selectedClip.value) return
-  const duration = Math.min(0.6, selected.value.duration)
+  const duration = Math.min(animationPhase.value === 'hold' ? 1.6 : 0.6, selected.value.duration)
   const offset = animationPhase.value === 'enter'
     ? 0
     : animationPhase.value === 'exit'
@@ -124,17 +139,24 @@ function addAnimation() {
     exit: { preset: 'fade', ease: 'power2.in', intensity: 100 },
   }
   commit((element) => {
-    element.animations.push({
+    const clip: AnimationClip = {
       id: uid('anim'),
       phase: animationPhase.value,
       offset,
       duration,
       ...defaults[animationPhase.value],
-    })
+    }
+    if (animationPhase.value === 'hold') {
+      clip.loop = true
+      clip.iterations = 2
+    }
+    element.animations.push(clip)
   })
+  queuePreview()
 }
 
 function removeAnimation() {
+  window.clearTimeout(previewTimer)
   commit((element) => {
     element.animations = element.animations.filter((clip) => clip.phase !== animationPhase.value)
   })
@@ -144,15 +166,30 @@ function setPreset(preset: string) {
   updateClip((clip) => { clip.preset = preset as AnimationClip['preset'] })
 }
 
-function updateClip(mutator: (clip: AnimationClip, element: EditorElement) => void) {
+function updateClip(mutator: (clip: AnimationClip, element: EditorElement) => void, autoPreview = true) {
   commit((element) => {
     const clip = element.animations.find((item) => item.phase === animationPhase.value)
     if (!clip) return
     mutator(clip, element)
     clip.duration = clamp(clip.duration, 0.05, element.duration)
     clip.offset = clamp(clip.offset, 0, Math.max(0, element.duration - clip.duration))
+    if (clip.phase === 'hold') {
+      clip.iterations = clamp(Math.round(Number(clip.iterations ?? 1)), 1, 50)
+      clip.loop = clip.loop !== false
+    }
   })
+  if (autoPreview) queuePreview()
 }
+
+function setHoldLoop(enabled: boolean) {
+  updateClip((clip) => { clip.loop = enabled })
+}
+
+function setHoldIterations(value: number) {
+  updateClip((clip) => { clip.iterations = clamp(Math.round(value || 1), 1, 50) })
+}
+
+onBeforeUnmount(() => window.clearTimeout(previewTimer))
 </script>
 
 <template>
@@ -234,7 +271,7 @@ function updateClip(mutator: (clip: AnimationClip, element: EditorElement) => vo
             v-for="phase in animationPhases"
             :key="phase"
             :class="{ active: animationPhase === phase, configured: selected.animations.some(item => item.phase === phase) }"
-            @click="animationPhase = phase"
+            @click="selectAnimationPhase(phase)"
           >{{ phaseLabel(phase) }}</button>
         </div>
 
@@ -247,7 +284,7 @@ function updateClip(mutator: (clip: AnimationClip, element: EditorElement) => vo
         <section v-else class="inspector-section animation-section">
           <header>
             <strong>{{ phaseLabel(animationPhase) }}动画</strong>
-            <button class="preview-link" @click="emit('preview', animationPhase)">预览</button>
+            <button class="preview-link" @click="emit('preview', animationPhase)">循环预览</button>
           </header>
           <div class="preset-grid">
             <button
@@ -261,6 +298,13 @@ function updateClip(mutator: (clip: AnimationClip, element: EditorElement) => vo
           <label class="field-row"><span>持续时间</span><input type="number" min="0.05" :max="selected.duration" step="0.05" :value="selectedClip.duration" @change="updateClip(clip => clip.duration = eventNumber($event))" /></label>
           <label class="field-row range-with-value"><span>效果强度</span><input type="range" min="0" max="200" step="1" :value="selectedClip.intensity" @input="updateClip(clip => clip.intensity = eventNumber($event))" /><output>{{ Math.round(selectedClip.intensity) }}%</output></label>
           <p class="field-help animation-strength-help">位移动画 100% 表示元素完全位于画布外，超过 100% 会继续远离画布。</p>
+
+          <template v-if="animationPhase === 'hold'">
+            <label class="field-row switch-field"><span>循环</span><input type="checkbox" :checked="selectedClip.loop !== false" @change="setHoldLoop(($event.target as HTMLInputElement).checked)" /></label>
+            <label class="field-row"><span>次数</span><input type="number" min="1" max="50" step="1" :disabled="selectedClip.loop !== false" :value="selectedClip.iterations ?? 1" @change="setHoldIterations(eventNumber($event))" /></label>
+            <p class="field-help">开启循环：在强调时间段内自动重复。关闭循环：按指定次数均匀完成往返动画。</p>
+          </template>
+
           <label class="field-row"><span>缓动曲线</span><select :value="selectedClip.ease" @change="updateClip(clip => clip.ease = eventValue($event))"><option v-for="ease in eases" :key="ease" :value="ease">{{ ease }}</option></select></label>
           <button class="remove-animation" @click="removeAnimation">删除这个动画</button>
         </section>
