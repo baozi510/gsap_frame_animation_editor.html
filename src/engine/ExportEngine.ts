@@ -61,7 +61,7 @@ export class ExportEngine {
       const startedAt = performance.now()
       for (let frame = 0; frame < totalFrames; frame += 1) {
         const time = frame / fps
-        timeline.seek(time)
+        await timeline.prepareFrame(time)
         await source.add(time, 1 / fps)
 
         const percent = ((frame + 1) / totalFrames) * 94
