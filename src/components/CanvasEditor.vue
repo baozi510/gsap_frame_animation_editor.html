@@ -19,6 +19,8 @@ const fitScale = ref(0.34)
 let resizeObserver: ResizeObserver | null = null
 let renderer: PixiEditorRenderer | null = null
 let timeline: TimelineEngine | null = null
+let knownSceneId = ''
+let knownElementIds = new Set<string>()
 
 const shellStyle = computed(() => {
   const scale = Math.max(0.08, fitScale.value * props.zoom)
@@ -34,6 +36,11 @@ function updateFitScale() {
   const maxWidth = Math.max(120, rect.width - 40)
   const maxHeight = Math.max(120, rect.height - 40)
   fitScale.value = Math.min(maxWidth / editorStore.project.width, maxHeight / editorStore.project.height)
+}
+
+function rememberCurrentElements() {
+  knownSceneId = editorStore.currentScene.value.id
+  knownElementIds = new Set(editorStore.currentScene.value.elements.map((element) => element.id))
 }
 
 async function initialize() {
@@ -59,6 +66,7 @@ async function initialize() {
   timeline.onTimeChange = (value) => emit('time', value)
   timeline.onPlayingChange = (value) => emit('playing', value)
   timeline.compile(editorStore.currentScene.value, false)
+  rememberCurrentElements()
   ready.value = true
   emit('ready')
   await nextTick()
@@ -90,8 +98,14 @@ function previewSegment(phase: AnimationPhase) {
 }
 function setLoop(value: boolean) { if (timeline) timeline.loop = value }
 
-watch(() => editorStore.revision.value, () => {
-  if (ready.value) void refreshAll(true)
+watch(() => editorStore.revision.value, async () => {
+  if (!ready.value) return
+  const scene = editorStore.currentScene.value
+  const selected = editorStore.selectedElement.value
+  const newlyAdded = scene.id === knownSceneId && Boolean(selected && !knownElementIds.has(selected.id))
+  await refreshAll(true)
+  if (newlyAdded && selected) timeline?.seek(selected.start)
+  rememberCurrentElements()
 })
 watch(() => editorStore.selectedId.value, () => renderer?.updateSelection())
 
