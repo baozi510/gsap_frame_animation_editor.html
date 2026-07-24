@@ -3,6 +3,20 @@ export type AnimationPhase = 'enter' | 'hold' | 'exit'
 export type EnterPreset = 'fade' | 'left' | 'right' | 'up' | 'down' | 'pop' | 'zoom' | 'rotate'
 export type HoldPreset = 'none' | 'float' | 'pulse' | 'swing' | 'shake' | 'zoom'
 export type ExitPreset = EnterPreset
+export type EditorFontWeight =
+  | 'normal'
+  | 'bold'
+  | 'bolder'
+  | 'lighter'
+  | '100'
+  | '200'
+  | '300'
+  | '400'
+  | '500'
+  | '600'
+  | '700'
+  | '800'
+  | '900'
 
 export interface AnimationSegment<TPreset extends string = string> {
   preset: TPreset
@@ -16,7 +30,7 @@ export interface ElementStyle {
   radius?: number
   color?: string
   fontSize?: number
-  fontWeight?: string
+  fontWeight?: EditorFontWeight
   fontFamily?: string
   align?: 'left' | 'center' | 'right'
 }
