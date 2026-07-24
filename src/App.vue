@@ -55,7 +55,7 @@ function preview(phase: AnimationPhase) {
 }
 
 function saveProjectFile() {
-  const json = JSON.stringify(editorStore.project, null, 2)
+  const json = JSON.stringify(editorStore.serializeProject(), null, 2)
   downloadBlob(new Blob([json], { type: 'application/json' }), `${editorStore.project.name}.json`)
   editorStore.notify('项目 JSON 已下载')
 }
@@ -72,7 +72,7 @@ function importProject(file?: File) {
     try {
       const project = JSON.parse(String(reader.result)) as Project
       if (!project.scenes || !project.width || !project.height) throw new Error('invalid')
-      editorStore.replaceProject(project, '项目已导入')
+      editorStore.replaceProject(project, '项目已导入，缺失素材会按 assetId 自动下载')
     } catch {
       editorStore.notify('无法识别这个项目文件')
     }
