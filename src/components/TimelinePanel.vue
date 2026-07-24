@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { editorStore } from '@/store/editorStore'
 import { clamp } from '@/utils/helpers'
-import { getElementMaxDuration } from '@/utils/editorCommands'
+import { getElementMaxDuration, refreshSceneDuration } from '@/utils/editorCommands'
 import type { EditorElement } from '@/types/editor'
 
 const props = defineProps<{ currentTime: number; playing: boolean; loop: boolean }>()
@@ -162,6 +162,7 @@ function stopPointer(event: PointerEvent) {
   const surface = event.currentTarget as HTMLElement
   if (surface.hasPointerCapture(event.pointerId)) surface.releasePointerCapture(event.pointerId)
   dragState.value = null
+  if (drag.mode !== 'scrub') refreshSceneDuration(scene.value)
   if (drag.mode !== 'scrub' && drag.before && drag.before !== JSON.stringify(editorStore.serializeProject())) {
     editorStore.finishLiveEdit(drag.before)
   }
