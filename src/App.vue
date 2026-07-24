@@ -27,7 +27,7 @@ import { editorStore } from '@/store/editorStore'
 import { ExportEngine } from '@/engine/ExportEngine'
 import type { AnimationPhase, ExportProgress, Project } from '@/types/editor'
 import { downloadBlob } from '@/utils/helpers'
-import { alignSelected, clearCurrentScene } from '@/utils/editorCommands'
+import { alignSelected, changeCanvasRatio, clearCurrentScene } from '@/utils/editorCommands'
 
 const canvas = ref<InstanceType<typeof CanvasEditor> | null>(null)
 const currentTime = ref(0)
@@ -171,7 +171,7 @@ onUnmounted(() => window.removeEventListener('keydown', keyboard))
           v-for="ratio in ratios"
           :key="ratio.label"
           :class="{ active: ratioKey === `${ratio.width}x${ratio.height}` }"
-          @click="editorStore.changeRatio(ratio.width, ratio.height)"
+          @click="changeCanvasRatio(ratio.width, ratio.height)"
         >{{ ratio.label }}</button>
       </div>
 
