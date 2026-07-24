@@ -46,7 +46,9 @@ async function initialize() {
       const element = editorStore.currentScene.value.elements.find((item) => item.id === id)
       if (element) updater(element)
     },
-    onTransformEnd: (before) => editorStore.finishLiveEdit(before),
+    onTransformEnd: (before) => {
+      if (before !== JSON.stringify(editorStore.project)) editorStore.finishLiveEdit(before)
+    },
   }
   await renderer.mount(host.value)
   timeline = new TimelineEngine(renderer)
