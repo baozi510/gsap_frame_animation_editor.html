@@ -72,7 +72,9 @@ export interface EditorElement {
   src?: string
   assetId?: string
   text?: string
+  /** Internal transform center X. The inspector exposes top-left X. */
   x: number
+  /** Internal transform center Y. The inspector exposes top-left Y. */
   y: number
   width: number
   height: number
@@ -93,6 +95,9 @@ export interface Scene {
   id: string
   name: string
   duration: number
+  /** When enabled, duration follows the last element end plus durationOffset. */
+  autoDuration?: boolean
+  durationOffset?: number
   background: string
   elements: EditorElement[]
 }

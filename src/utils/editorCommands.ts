@@ -14,6 +14,7 @@ export function clearCurrentScene() {
   editorStore.commit(() => {
     editorStore.currentScene.value.elements = []
     editorStore.selectedId.value = null
+    refreshSceneDuration(editorStore.currentScene.value)
   }, '当前场景已清空')
 }
 
@@ -35,6 +36,61 @@ export function moveSelectedLayer(direction: 'up' | 'down' | 'top' | 'bottom') {
   }, '元素层级已调整')
 }
 
+export function reorderLayer(draggedId: string, targetId: string) {
+  if (draggedId === targetId) return
+  editorStore.commit(() => {
+    const displayOrder = [...editorStore.currentScene.value.elements].sort((a, b) => b.z - a.z)
+    const from = displayOrder.findIndex((item) => item.id === draggedId)
+    const to = displayOrder.findIndex((item) => item.id === targetId)
+    if (from < 0 || to < 0) return
+    const [moved] = displayOrder.splice(from, 1)
+    displayOrder.splice(to, 0, moved)
+    displayOrder.forEach((item, index) => { item.z = displayOrder.length - index })
+  }, '图层顺序已调整')
+}
+
+export type AlignMode = 'left' | 'hcenter' | 'right' | 'top' | 'vcenter' | 'bottom'
+
+export function alignSelected(mode: AlignMode) {
+  const element = editorStore.selectedElement.value
+  if (!element) return
+  editorStore.updateElement((target) => {
+    if (mode === 'left') target.x = target.width / 2
+    if (mode === 'hcenter') target.x = editorStore.project.width / 2
+    if (mode === 'right') target.x = editorStore.project.width - target.width / 2
+    if (mode === 'top') target.y = target.height / 2
+    if (mode === 'vcenter') target.y = editorStore.project.height / 2
+    if (mode === 'bottom') target.y = editorStore.project.height - target.height / 2
+  }, '元素已对齐到画布')
+}
+
+export function getSceneContentEnd(scene: Scene) {
+  return scene.elements.reduce((end, element) => Math.max(end, element.start + element.duration), 0)
+}
+
+export function refreshSceneDuration(scene: Scene = editorStore.currentScene.value) {
+  if (scene.autoDuration === false) return scene.duration
+  const offset = Math.max(0, Number(scene.durationOffset ?? 0))
+  scene.duration = Math.max(0.5, getSceneContentEnd(scene) + offset)
+  return scene.duration
+}
+
+export function setSceneAutoDuration(enabled: boolean) {
+  editorStore.commit(() => {
+    const scene = editorStore.currentScene.value
+    scene.autoDuration = enabled
+    if (enabled) refreshSceneDuration(scene)
+  }, enabled ? '场景时长已设为自动' : '场景时长已设为手动')
+}
+
+export function setSceneDurationOffset(value: number) {
+  editorStore.commit(() => {
+    const scene = editorStore.currentScene.value
+    scene.durationOffset = Math.max(0, value || 0)
+    refreshSceneDuration(scene)
+  }, '场景尾部 offset 已更新')
+}
+
 export function moveScene(sceneId: string, direction: -1 | 1) {
   editorStore.commit(() => {
     const index = editorStore.project.scenes.findIndex((scene) => scene.id === sceneId)
@@ -49,8 +105,9 @@ export function addExitToAllElements(exitDuration = 0.5) {
   const scene = editorStore.currentScene.value
   if (!scene.elements.length) return
   editorStore.commit(() => {
+    const contentEnd = Math.max(getSceneContentEnd(scene), scene.duration)
     scene.elements.forEach((element) => {
-      const remaining = Math.max(0.1, scene.duration - element.start)
+      const remaining = Math.max(0.1, contentEnd - element.start)
       element.duration = remaining
       const duration = Math.min(exitDuration, remaining)
       const clip: AnimationClip = {
@@ -65,6 +122,7 @@ export function addExitToAllElements(exitDuration = 0.5) {
       element.animations = element.animations.filter((item) => item.phase !== 'exit')
       element.animations.push(clip)
     })
+    refreshSceneDuration(scene)
   }, '已为当前场景全部元素添加统一退场')
 }
 
@@ -77,12 +135,13 @@ export function addRemoteAssetToScene(asset: ProjectAsset, atTime = 0) {
   const start = clamp(atTime, 0, Math.max(0, scene.duration - 0.1))
   const sourceDuration = asset.type === 'video' && asset.duration ? Math.max(0.1, asset.duration) : null
   const visibleDuration = sourceDuration ?? clamp(scene.duration - start, 0.5, 3)
-  const requiredSceneDuration = start + visibleDuration
   const maxWidth = editorStore.project.width * 0.74
   const maxHeight = editorStore.project.height * 0.58
   const sourceWidth = Math.max(1, asset.width || 640)
   const sourceHeight = Math.max(1, asset.height || 360)
   const scale = Math.min(1, maxWidth / sourceWidth, maxHeight / sourceHeight)
+  const width = sourceWidth * scale
+  const height = sourceHeight * scale
   const element: EditorElement = {
     id: uid('el'),
     type: asset.type,
@@ -90,8 +149,8 @@ export function addRemoteAssetToScene(asset: ProjectAsset, atTime = 0) {
     assetId: asset.id,
     x: editorStore.project.width / 2,
     y: editorStore.project.height / 2,
-    width: sourceWidth * scale,
-    height: sourceHeight * scale,
+    width,
+    height,
     rotation: 0,
     alpha: 1,
     z: nextZ(),
@@ -107,8 +166,11 @@ export function addRemoteAssetToScene(asset: ProjectAsset, atTime = 0) {
     const assetIndex = editorStore.project.assets.findIndex((item) => item.id === asset.id)
     if (assetIndex >= 0) editorStore.project.assets[assetIndex] = clone(asset)
     else editorStore.project.assets.push(clone(asset))
-    if (sourceDuration && requiredSceneDuration > scene.duration) scene.duration = requiredSceneDuration
     scene.elements.push(element)
+    if (sourceDuration && scene.autoDuration === false && start + sourceDuration > scene.duration) {
+      scene.duration = start + sourceDuration
+    }
+    refreshSceneDuration(scene)
     editorStore.selectedId.value = element.id
   }, `${asset.type === 'video' ? '视频' : '图片'}素材已加入画布`)
 }
