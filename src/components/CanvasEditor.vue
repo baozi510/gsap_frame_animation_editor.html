@@ -49,6 +49,7 @@ async function initialize() {
     onTransformEnd: (before) => {
       if (before !== JSON.stringify(editorStore.project)) editorStore.finishLiveEdit(before)
     },
+    onAssetError: (message) => editorStore.notify(message),
   }
   await renderer.mount(host.value)
   timeline = new TimelineEngine(renderer)
@@ -87,7 +88,7 @@ function previewSegment(phase: AnimationPhase) {
 function setLoop(value: boolean) { if (timeline) timeline.loop = value }
 
 watch(() => editorStore.revision.value, () => {
-  if (ready.value) void refreshAll(false)
+  if (ready.value) void refreshAll(true)
 })
 watch(() => editorStore.selectedId.value, () => renderer?.updateSelection())
 
