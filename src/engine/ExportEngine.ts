@@ -52,7 +52,10 @@ export class ExportEngine {
 
       await renderer.mount(host)
       renderer.setControlsVisible(false)
-      timeline = new TimelineEngine(renderer)
+      timeline = new TimelineEngine(renderer, () => ({
+        width: exportProject.width,
+        height: exportProject.height,
+      }))
 
       const output = new Output({ format, target: new BufferTarget() })
       const source = new CanvasSource(renderer.app!.canvas, {
