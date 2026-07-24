@@ -9,6 +9,7 @@ import { editorStore } from '@/store/editorStore'
 import { ExportEngine } from '@/engine/ExportEngine'
 import type { AnimationPhase, ExportProgress, Project } from '@/types/editor'
 import { downloadBlob } from '@/utils/helpers'
+import { clearCurrentScene, moveSelectedLayer } from '@/utils/editorCommands'
 
 const canvas = ref<InstanceType<typeof CanvasEditor> | null>(null)
 const currentTime = ref(0)
@@ -73,6 +74,7 @@ function importProject(file?: File) {
       const project = JSON.parse(String(reader.result)) as Project
       if (!project.scenes || !project.width || !project.height) throw new Error('invalid')
       editorStore.replaceProject(project, '项目已导入，缺失素材会按 assetId 自动下载')
+      currentTime.value = 0
     } catch {
       editorStore.notify('无法识别这个项目文件')
     }
@@ -84,14 +86,13 @@ function importProject(file?: File) {
 async function exportMp4() {
   exportProgress.active = true
   exportProgress.percent = 0
-  exportProgress.title = '准备导出'
-  exportProgress.detail = '正在检查浏览器编码能力…'
+  exportProgress.title = '准备导出完整视频'
+  exportProgress.detail = `将按场景列表顺序串联 ${editorStore.project.scenes.length} 个场景…`
   delete exportProgress.error
   canvas.value?.pause()
   try {
-    await exportEngine.exportCurrentScene({
+    await exportEngine.exportProject({
       project: editorStore.project,
-      scene: editorStore.currentScene.value,
       onProgress: (next) => Object.assign(exportProgress, next),
     })
   } catch (error) {
@@ -160,9 +161,9 @@ onUnmounted(() => window.removeEventListener('keydown', keyboard))
       <button
         class="top-button export-button"
         :disabled="exportSupported === false"
-        :title="exportSupported === false ? '当前浏览器不支持 H.264 WebCodecs' : '逐帧渲染并导出 MP4'"
+        :title="exportSupported === false ? '当前浏览器不支持 H.264 WebCodecs' : '按场景顺序导出完整 MP4'"
         @click="exportMp4"
-      >导出 MP4</button>
+      >导出完整 MP4</button>
     </header>
 
     <section class="workspace">
@@ -173,7 +174,12 @@ onUnmounted(() => window.removeEventListener('keydown', keyboard))
           <div class="toolbar-group">
             <button @click="editorStore.centerSelected">居中</button>
             <button @click="editorStore.duplicateSelected">复制</button>
+            <button @click="moveSelectedLayer('bottom')">置底</button>
+            <button @click="moveSelectedLayer('down')">下移</button>
+            <button @click="moveSelectedLayer('up')">上移</button>
+            <button @click="moveSelectedLayer('top')">置顶</button>
             <button @click="editorStore.removeSelected">删除</button>
+            <button class="danger-toolbar" @click="clearCurrentScene">清空画布</button>
           </div>
           <div class="toolbar-group zoom-group">
             <button @click="setZoom(zoom / 1.12)">－</button>
