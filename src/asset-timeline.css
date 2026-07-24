@@ -1,0 +1,54 @@
+/* Remote asset library */
+.asset-api-head { margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; }
+.asset-api-head div { min-width: 0; }
+.asset-api-head strong, .asset-api-head small { display: block; }
+.asset-api-head strong { font-size: 12px; }
+.asset-api-head small { margin-top: 3px; color: var(--muted); font-size: 8px; }
+.asset-api-head > button { height: 27px; padding: 0 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); color: var(--muted); font-size: 9px; }
+.asset-api-settings { margin-bottom: 10px; padding: 9px; border: 1px solid var(--line); border-radius: 8px; background: #101217; }
+.asset-api-settings label { margin-bottom: 7px; display: grid; gap: 4px; }
+.asset-api-settings label span { color: var(--muted); font-size: 8px; }
+.asset-api-settings input, .folder-create input { width: 100%; height: 29px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; background: #0c0e12; outline: 0; font-size: 9px; }
+.asset-api-settings input:focus, .folder-create input:focus { border-color: #6651cf; }
+.asset-api-settings > button { width: 100%; height: 29px; border: 0; border-radius: 6px; background: var(--accent); font-size: 9px; font-weight: 700; }
+.upload-zone:disabled { opacity: .6; cursor: progress; }
+.folder-toolbar { margin-top: 10px; display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 9px; }
+.folder-toolbar button { height: 26px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--muted); font-size: 9px; }
+.folder-toolbar button.active { color: #fff; background: var(--accent-soft); border-color: #504286; }
+.folder-create { margin-top: 7px; display: grid; grid-template-columns: minmax(0, 1fr) 48px; gap: 6px; }
+.folder-create button { border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); font-size: 9px; }
+.folder-list { margin-top: 7px; display: flex; gap: 5px; overflow-x: auto; padding-bottom: 2px; }
+.folder-list button { height: 28px; max-width: 130px; padding: 0 8px; display: flex; align-items: center; gap: 5px; border: 1px solid var(--line); border-radius: 6px; background: #15181e; color: var(--muted); font-size: 9px; white-space: nowrap; }
+.folder-list button.active { background: #29243e; border-color: #4b3c79; color: #fff; }
+.folder-list button span { overflow: hidden; text-overflow: ellipsis; }
+.asset-empty { min-height: 54px; display: grid; place-items: center; border: 1px dashed #353b47; border-radius: 8px; color: var(--muted-2); font-size: 9px; }
+.remote-asset-card { height: 112px; position: relative; }
+.remote-asset-card img, .video-thumb { width: 100%; height: 66px; display: grid; place-items: center; object-fit: cover; background: #0f1116; }
+.video-thumb { color: #a999ff; font-size: 22px; }
+.remote-asset-card > span { height: 25px; padding-right: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.remote-asset-card small { position: absolute; left: 7px; bottom: 3px; color: var(--muted-2); font-size: 7px; }
+.remote-asset-card small.cached { color: var(--green); }
+
+/* Independent element spans with optional animation overlays */
+.timeline-legend { display: flex; align-items: center; gap: 8px; margin-right: 4px; }
+.timeline-legend span { display: flex; align-items: center; gap: 3px; color: var(--muted-2); font-size: 8px; }
+.timeline-legend i { width: 10px; height: 4px; border-radius: 3px; }
+.timeline-legend i.enter { background: var(--blue); }
+.timeline-legend i.hold { background: var(--accent); }
+.timeline-legend i.exit { background: var(--orange); }
+.timeline-labels button { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.timeline-labels button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.timeline-labels button small { flex: none; color: var(--muted-2); font-size: 8px; }
+.element-span { position: absolute; top: 6px; height: 22px; min-width: 3px; padding: 0 7px; display: flex; align-items: center; overflow: hidden; border: 1px solid #605b70; border-radius: 5px; background: #393642; z-index: 1; pointer-events: none; }
+.track-row.selected .element-span { border-color: #8f7cff; background: #4a435f; }
+.element-span span { overflow: hidden; color: #f3f1f8; font-size: 8px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.animation-overlay { position: absolute; bottom: 3px; height: 6px; min-width: 3px; border-radius: 4px; z-index: 3; pointer-events: none; box-shadow: 0 0 0 1px #0c0d11aa; }
+.animation-overlay.enter { background: var(--blue); }
+.animation-overlay.hold { background: var(--accent); }
+.animation-overlay.exit { background: var(--orange); }
+.animation-phase-tabs button.configured::after { content: ""; width: 4px; height: 4px; margin-left: 5px; display: inline-block; border-radius: 50%; background: var(--green); vertical-align: middle; }
+.animation-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.animation-empty strong { font-size: 11px; }
+.animation-empty span { color: var(--muted); font-size: 9px; line-height: 1.5; }
+.animation-empty button { width: 100%; height: 33px; border: 1px solid #504286; border-radius: 7px; background: var(--accent-soft); color: #ddd6ff; font-size: 10px; }
+.remove-animation { width: 100%; height: 31px; margin-top: 8px; border: 1px solid #5a3038; border-radius: 7px; background: #2a171b; color: #ff8998; font-size: 9px; }
