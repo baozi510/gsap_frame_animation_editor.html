@@ -19,6 +19,7 @@ import {
   getProjectDuration,
   moveScene,
   reorderLayer,
+  type LayerDropPosition,
 } from '@/utils/editorCommands'
 
 const props = defineProps<{ currentTime: number }>()
@@ -34,6 +35,7 @@ const newFolderName = ref('')
 const cachedMap = ref<Record<string, boolean>>({})
 const draggedLayerId = ref<string | null>(null)
 const dragOverLayerId = ref<string | null>(null)
+const dragOverPosition = ref<LayerDropPosition>('before')
 
 const currentFolder = computed(() => folders.value.find((folder) => folder.id === currentFolderId.value) ?? null)
 const totalDuration = computed(() => getProjectDuration())
@@ -124,6 +126,7 @@ function addAsset(asset: ProjectAsset) {
 function startLayerDrag(id: string, event: DragEvent) {
   draggedLayerId.value = id
   dragOverLayerId.value = id
+  dragOverPosition.value = 'before'
   editorStore.select(id)
   if (event.dataTransfer) {
     event.dataTransfer.effectAllowed = 'move'
@@ -133,20 +136,24 @@ function startLayerDrag(id: string, event: DragEvent) {
 
 function dragOverLayer(id: string, event: DragEvent) {
   event.preventDefault()
+  const row = event.currentTarget as HTMLElement
+  const rect = row.getBoundingClientRect()
   dragOverLayerId.value = id
+  dragOverPosition.value = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
   if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
 }
 
 function dropLayer(targetId: string, event: DragEvent) {
   event.preventDefault()
   const sourceId = draggedLayerId.value || event.dataTransfer?.getData('text/plain') || null
-  if (sourceId && sourceId !== targetId) reorderLayer(sourceId, targetId)
+  if (sourceId && sourceId !== targetId) reorderLayer(sourceId, targetId, dragOverPosition.value)
   finishLayerDrag()
 }
 
 function finishLayerDrag() {
   draggedLayerId.value = null
   dragOverLayerId.value = null
+  dragOverPosition.value = 'before'
 }
 
 function selectLayer(id: string) {
@@ -266,7 +273,8 @@ onBeforeUnmount(() => window.removeEventListener('motionframe:asset-settings', o
         :class="{
           active: element.id === editorStore.selectedId.value,
           dragging: element.id === draggedLayerId,
-          'drop-target': element.id === dragOverLayerId && element.id !== draggedLayerId,
+          'drop-before': element.id === dragOverLayerId && element.id !== draggedLayerId && dragOverPosition === 'before',
+          'drop-after': element.id === dragOverLayerId && element.id !== draggedLayerId && dragOverPosition === 'after',
         }"
         draggable="true"
         role="button"
