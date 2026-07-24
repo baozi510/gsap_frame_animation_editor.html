@@ -2,6 +2,8 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { editorStore } from '@/store/editorStore'
 import { clamp } from '@/utils/helpers'
+import { getElementMaxDuration } from '@/utils/editorCommands'
+import type { EditorElement } from '@/types/editor'
 
 const props = defineProps<{ currentTime: number; playing: boolean; loop: boolean }>()
 const emit = defineEmits<{
@@ -11,11 +13,22 @@ const emit = defineEmits<{
   loop: []
 }>()
 
+type DragMode = 'scrub' | 'move' | 'resize-start' | 'resize-end'
+interface DragState {
+  mode: DragMode
+  pointerId: number
+  startClientX: number
+  elementId?: string
+  originalStart?: number
+  originalDuration?: number
+  before?: string
+}
+
 const scene = computed(() => editorStore.currentScene.value)
 const viewport = ref<HTMLElement | null>(null)
 const viewportWidth = ref(900)
 const timelineZoom = ref(1)
-const scrubbing = ref(false)
+const dragState = ref<DragState | null>(null)
 let resizeObserver: ResizeObserver | null = null
 
 const elements = computed(() => [...scene.value.elements].sort((a, b) => b.z - a.z))
@@ -62,25 +75,96 @@ function seekFromPointer(event: PointerEvent) {
   emit('seek', clamp(value, 0, scene.value.duration))
 }
 
-function startScrub(event: PointerEvent) {
+function clampAnimations(element: EditorElement) {
+  element.animations.forEach((clip) => {
+    clip.duration = clamp(clip.duration, 0.05, element.duration)
+    clip.offset = clamp(clip.offset, 0, Math.max(0, element.duration - clip.duration))
+  })
+}
+
+function startPointer(event: PointerEvent) {
   if (event.button !== 0) return
+  const surface = event.currentTarget as HTMLElement
   const target = event.target as HTMLElement
+  const span = target.closest<HTMLElement>('.element-span')
+
+  if (span?.dataset.elementId) {
+    const element = scene.value.elements.find((item) => item.id === span.dataset.elementId)
+    if (!element) return
+    editorStore.select(element.id)
+    const handle = target.closest<HTMLElement>('.span-handle')
+    const mode: DragMode = handle?.dataset.side === 'start'
+      ? 'resize-start'
+      : handle?.dataset.side === 'end'
+        ? 'resize-end'
+        : 'move'
+    dragState.value = {
+      mode,
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      elementId: element.id,
+      originalStart: element.start,
+      originalDuration: element.duration,
+      before: JSON.stringify(editorStore.serializeProject()),
+    }
+    surface.setPointerCapture(event.pointerId)
+    event.preventDefault()
+    return
+  }
+
   const row = target.closest<HTMLElement>('.track-row')
   if (row?.dataset.elementId) editorStore.select(row.dataset.elementId)
-  scrubbing.value = true
-  ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
+  dragState.value = { mode: 'scrub', pointerId: event.pointerId, startClientX: event.clientX }
+  surface.setPointerCapture(event.pointerId)
   seekFromPointer(event)
 }
 
-function moveScrub(event: PointerEvent) {
-  if (scrubbing.value) seekFromPointer(event)
+function movePointer(event: PointerEvent) {
+  const drag = dragState.value
+  if (!drag || drag.pointerId !== event.pointerId) return
+  if (drag.mode === 'scrub') {
+    seekFromPointer(event)
+    return
+  }
+
+  const element = scene.value.elements.find((item) => item.id === drag.elementId)
+  if (!element) return
+  const originalStart = drag.originalStart ?? element.start
+  const originalDuration = drag.originalDuration ?? element.duration
+  const delta = (event.clientX - drag.startClientX) / Math.max(1, pixelsPerSecond.value)
+
+  if (drag.mode === 'move') {
+    element.start = clamp(originalStart + delta, 0, Math.max(0, scene.value.duration - originalDuration))
+  } else if (drag.mode === 'resize-start') {
+    const originalEnd = originalStart + originalDuration
+    let nextStart = clamp(originalStart + delta, 0, originalEnd - 0.1)
+    let nextDuration = originalEnd - nextStart
+    const sourceLimit = element.type === 'video' && element.assetId
+      ? editorStore.project.assets.find((item) => item.id === element.assetId)?.duration
+      : undefined
+    if (sourceLimit && nextDuration > sourceLimit) {
+      nextDuration = sourceLimit
+      nextStart = originalEnd - nextDuration
+    }
+    element.start = nextStart
+    element.duration = clamp(nextDuration, 0.1, scene.value.duration - nextStart)
+    clampAnimations(element)
+  } else {
+    const maxDuration = getElementMaxDuration(element, scene.value)
+    element.duration = clamp(originalDuration + delta, 0.1, maxDuration)
+    clampAnimations(element)
+  }
 }
 
-function stopScrub(event: PointerEvent) {
-  if (!scrubbing.value) return
-  scrubbing.value = false
+function stopPointer(event: PointerEvent) {
+  const drag = dragState.value
+  if (!drag || drag.pointerId !== event.pointerId) return
   const surface = event.currentTarget as HTMLElement
   if (surface.hasPointerCapture(event.pointerId)) surface.releasePointerCapture(event.pointerId)
+  dragState.value = null
+  if (drag.mode !== 'scrub' && drag.before && drag.before !== JSON.stringify(editorStore.serializeProject())) {
+    editorStore.finishLiveEdit(drag.before)
+  }
 }
 
 function setTimelineZoom(value: number) {
@@ -115,6 +199,7 @@ onBeforeUnmount(() => resizeObserver?.disconnect())
       <strong>{{ currentTime.toFixed(2) }}s</strong>
       <span>/ {{ scene.duration.toFixed(2) }}s</span>
       <div class="timeline-spacer" />
+      <span class="timeline-hint">拖动片段移动 · 拖左右边缘调整时长</span>
       <div class="timeline-legend">
         <span><i class="enter" />进场</span>
         <span><i class="hold" />强调</span>
@@ -122,15 +207,7 @@ onBeforeUnmount(() => resizeObserver?.disconnect())
       </div>
       <div class="timeline-zoom">
         <button title="缩小时间轨" @click="setTimelineZoom(timelineZoom - 0.25)">－</button>
-        <input
-          aria-label="时间轨缩放"
-          type="range"
-          min="1"
-          max="4"
-          step="0.25"
-          :value="timelineZoom"
-          @input="setTimelineZoom(Number(($event.target as HTMLInputElement).value))"
-        />
+        <input aria-label="时间轨缩放" type="range" min="1" max="4" step="0.25" :value="timelineZoom" @input="setTimelineZoom(Number(($event.target as HTMLInputElement).value))" />
         <button title="放大时间轨" @click="setTimelineZoom(timelineZoom + 0.25)">＋</button>
         <span>{{ Math.round(timelineZoom * 100) }}%</span>
       </div>
@@ -140,55 +217,32 @@ onBeforeUnmount(() => resizeObserver?.disconnect())
     <div class="timeline-body">
       <div class="timeline-labels">
         <div class="ruler-label">图层</div>
-        <button
-          v-for="element in elements"
-          :key="element.id"
-          :class="{ active: element.id === editorStore.selectedId.value }"
-          @click="editorStore.select(element.id)"
-        >
-          <span>{{ element.name }}</span>
-          <small>{{ element.duration.toFixed(1) }}s</small>
+        <button v-for="element in elements" :key="element.id" :class="{ active: element.id === editorStore.selectedId.value }" @click="editorStore.select(element.id)">
+          <span>{{ element.name }}</span><small>{{ element.duration.toFixed(1) }}s</small>
         </button>
       </div>
 
       <div ref="viewport" class="timeline-tracks">
         <div
           class="timeline-surface"
-          :class="{ scrubbing }"
+          :class="{ scrubbing: dragState?.mode === 'scrub', dragging: dragState && dragState.mode !== 'scrub' }"
           :style="{ width: `${timelineWidth}px` }"
-          @pointerdown="startScrub"
-          @pointermove="moveScrub"
-          @pointerup="stopScrub"
-          @pointercancel="stopScrub"
+          @pointerdown="startPointer"
+          @pointermove="movePointer"
+          @pointerup="stopPointer"
+          @pointercancel="stopPointer"
         >
           <div class="ruler" :style="gridStyle">
-            <span
-              v-for="tick in ticks"
-              :key="tick"
-              :class="{ major: Number.isInteger(tick) }"
-              :style="{ left: `${timeToPx(tick)}px` }"
-            >{{ Number.isInteger(tick) ? `${tick}s` : tick }}</span>
+            <span v-for="tick in ticks" :key="tick" :class="{ major: Number.isInteger(tick) }" :style="{ left: `${timeToPx(tick)}px` }">{{ Number.isInteger(tick) ? `${tick}s` : tick }}</span>
           </div>
 
-          <div
-            v-for="element in elements"
-            :key="element.id"
-            class="track-row"
-            :class="{ selected: element.id === editorStore.selectedId.value }"
-            :data-element-id="element.id"
-            :style="gridStyle"
-          >
-            <div class="element-span" :style="clipStyle(element.start, element.duration)" :title="`${element.name} · ${element.duration.toFixed(2)}s`">
+          <div v-for="element in elements" :key="element.id" class="track-row" :class="{ selected: element.id === editorStore.selectedId.value }" :data-element-id="element.id" :style="gridStyle">
+            <div class="element-span" :data-element-id="element.id" :style="clipStyle(element.start, element.duration)" :title="`${element.name} · ${element.duration.toFixed(2)}s`">
+              <i class="span-handle start" data-side="start" />
               <span>{{ element.name }}</span>
+              <i class="span-handle end" data-side="end" />
             </div>
-            <div
-              v-for="clip in element.animations"
-              :key="clip.id"
-              class="animation-overlay"
-              :class="clip.phase"
-              :style="animationStyle(element.start, clip.offset, clip.duration)"
-              :title="`${phaseLabel(clip.phase)} · ${clip.preset} · ${clip.duration.toFixed(2)}s`"
-            />
+            <div v-for="clip in element.animations" :key="clip.id" class="animation-overlay" :class="clip.phase" :style="animationStyle(element.start, clip.offset, clip.duration)" :title="`${phaseLabel(clip.phase)} · ${clip.preset} · ${clip.duration.toFixed(2)}s`" />
           </div>
 
           <div class="playhead" :style="{ left: playheadLeft }"><i /></div>
