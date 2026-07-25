@@ -4,7 +4,7 @@ import { editorStore } from '@/store/editorStore'
 import { PixiEditorRenderer } from '@/engine/PixiEditorRenderer'
 import { TimelineEngine } from '@/engine/TimelineEngine'
 
-const props = defineProps<{ zoom: number }>()
+const props = withDefaults(defineProps<{ zoom: number; initialTime?: number }>(), { initialTime: 0 })
 const emit = defineEmits<{
   ready: []
   time: [value: number]
@@ -65,6 +65,7 @@ async function initialize() {
   timeline.onTimeChange = (value) => emit('time', value)
   timeline.onPlayingChange = (value) => emit('playing', value)
   timeline.compile(editorStore.currentScene.value, false)
+  timeline.seek(Math.min(Math.max(0, Number(props.initialTime || 0)), editorStore.currentScene.value.duration))
   rememberCurrentElements()
   ready.value = true
   emit('ready')
@@ -106,7 +107,15 @@ watch(() => editorStore.revision.value, async () => {
   if (newlyAdded && selected) timeline?.seek(selected.start)
   rememberCurrentElements()
 })
-watch(() => editorStore.selectedId.value, () => renderer?.updateSelection())
+
+watch(() => editorStore.selectedId.value, () => {
+  const selected = editorStore.selectedElement.value
+  if (selected && timeline) {
+    const end = selected.start + selected.duration
+    if (timeline.time < selected.start || timeline.time >= end) timeline.seek(selected.start)
+  }
+  renderer?.updateSelection()
+})
 
 onMounted(() => {
   resizeObserver = new ResizeObserver(updateFitScale)
