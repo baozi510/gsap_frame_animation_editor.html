@@ -5,6 +5,7 @@ export type EnterPreset = 'fade' | 'left' | 'right' | 'up' | 'down' | 'pop' | 'z
 export type HoldPreset = 'float' | 'pulse' | 'swing' | 'shake' | 'zoom'
 export type ExitPreset = EnterPreset
 export type AnimationPreset = EnterPreset | HoldPreset | ExitPreset
+export type MotionRelation = 'free' | 'chain' | 'parallel'
 export type EditorFontWeight =
   | 'normal'
   | 'bold'
@@ -33,6 +34,32 @@ export interface AnimationClip {
   iterations?: number
   /** For emphasis clips, automatically repeat throughout the clip duration. */
   loop?: boolean
+}
+
+/**
+ * A composable ordinary animation. Every property is relative to the state at
+ * the clip start. Independent clips are accumulated, so parallel clips can
+ * safely animate different or identical properties at the same time.
+ */
+export interface MotionClip {
+  id: string
+  name: string
+  /** Relative to the element's start time. */
+  offset: number
+  duration: number
+  ease: string
+  /** Horizontal and vertical relative movement in canvas pixels. */
+  x: number
+  y: number
+  /** 100 keeps the current scale, 120 enlarges by 20%. */
+  scale: number
+  /** Relative rotation in degrees. */
+  rotation: number
+  /** Relative opacity change in percentage points, from -100 to 100. */
+  opacity: number
+  /** Placement relationship used by the editor when clips are rearranged. */
+  relation?: MotionRelation
+  linkedTo?: string
 }
 
 export interface ProjectAsset {
@@ -66,6 +93,8 @@ export interface ElementStyle {
   fontWeight?: EditorFontWeight
   fontFamily?: string
   align?: 'left' | 'center' | 'right'
+  /** Stored inside style for backward-compatible project normalization. */
+  motionAnimations?: MotionClip[]
 }
 
 export interface EditorElement {
@@ -90,7 +119,7 @@ export interface EditorElement {
   start: number
   /** Independent visible span on the scene timeline. */
   duration: number
-  /** Optional animation overlays. An element may have zero animations. */
+  /** Optional enter, emphasis, and exit overlays. */
   animations: AnimationClip[]
   style: ElementStyle
 }
