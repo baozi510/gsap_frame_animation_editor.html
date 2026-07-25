@@ -1,6 +1,7 @@
 import { gsap } from 'gsap'
-import type { AnimationClip, EditorElement, RuntimeState, Scene } from '@/types/editor'
+import type { AnimationClip, EditorElement, MotionClip, RuntimeState, Scene } from '@/types/editor'
 import { clamp } from '@/utils/helpers'
+import { getMotionClips } from '@/utils/motionClips'
 
 export interface TimelineRenderer {
   applyRuntime(states: Map<string, RuntimeState>): void
@@ -15,6 +16,14 @@ export interface TimelineCanvasSize {
   height: number
 }
 
+interface MotionRuntime {
+  x: number
+  y: number
+  rotation: number
+  scale: number
+  opacity: number
+}
+
 export class TimelineEngine {
   private renderer: TimelineRenderer
   private getCanvasSize: () => TimelineCanvasSize
@@ -22,6 +31,8 @@ export class TimelineEngine {
   private timeline: gsap.core.Timeline | null = null
   private previewTween: gsap.core.Tween | null = null
   private states = new Map<string, RuntimeState>()
+  private composedStates = new Map<string, RuntimeState>()
+  private motionLayers = new Map<string, MotionRuntime[]>()
   time = 0
   playing = false
   loop = false
@@ -39,13 +50,15 @@ export class TimelineEngine {
     this.timeline?.kill()
     this.scene = scene
     this.states.clear()
+    this.composedStates.clear()
+    this.motionLayers.clear()
     this.setPlaying(false)
 
     const timeline = gsap.timeline({
       paused: true,
       onUpdate: () => {
         this.time = timeline.time()
-        this.renderer.applyRuntime(this.states)
+        this.applyComposedRuntime()
         this.renderer.setMediaTime?.(this.time)
         this.renderer.renderNow?.()
         this.onTimeChange?.(this.time)
@@ -70,21 +83,22 @@ export class TimelineEngine {
     const base = this.baseState(element)
     const state: RuntimeState = { ...base, visible: false }
     this.states.set(element.id, state)
+    this.motionLayers.set(element.id, [])
 
     const sceneDuration = this.scene?.duration ?? element.start + element.duration
     const elementStart = clamp(element.start, 0, sceneDuration)
     const elementEnd = clamp(element.start + element.duration, elementStart, sceneDuration)
     timeline.set(state, { ...base, visible: element.visible }, elementStart)
 
-    // A clip ending before the scene should disappear at its own end. When it
-    // reaches the scene boundary, keep the final frame visible unless an
-    // explicit exit animation hides it.
     if (elementEnd < sceneDuration - 0.0001) {
       timeline.set(state, { visible: false }, elementEnd)
     }
 
     const clips = [...element.animations].sort((a, b) => a.offset - b.offset)
     clips.forEach((clip) => this.addAnimationClip(timeline, state, element, base, clip, elementStart, elementEnd))
+
+    const motionClips = getMotionClips(element).slice().sort((a, b) => a.offset - b.offset || a.id.localeCompare(b.id))
+    motionClips.forEach((clip) => this.addMotionClip(timeline, element, clip, elementStart, elementEnd))
   }
 
   private addAnimationClip(
@@ -114,6 +128,48 @@ export class TimelineEngine {
     }
 
     this.addHoldClip(timeline, state, clip, base, element, start, duration)
+  }
+
+  private addMotionClip(
+    timeline: gsap.core.Timeline,
+    element: EditorElement,
+    clip: MotionClip,
+    elementStart: number,
+    elementEnd: number,
+  ) {
+    const start = clamp(elementStart + Number(clip.offset || 0), elementStart, elementEnd)
+    const end = clamp(start + Number(clip.duration || 0.8), start, elementEnd)
+    const duration = Math.max(0.01, end - start)
+    const layer: MotionRuntime = { x: 0, y: 0, rotation: 0, scale: 1, opacity: 0 }
+    this.motionLayers.get(element.id)?.push(layer)
+
+    timeline.to(layer, {
+      x: Number(clip.x || 0),
+      y: Number(clip.y || 0),
+      rotation: Number(clip.rotation || 0),
+      scale: clamp(Number(clip.scale ?? 100), 1, 500) / 100,
+      opacity: clamp(Number(clip.opacity || 0), -100, 100) / 100,
+      duration,
+      ease: clip.ease || 'power2.inOut',
+    }, start)
+  }
+
+  private applyComposedRuntime() {
+    this.composedStates.clear()
+    this.states.forEach((state, id) => {
+      const output: RuntimeState = { ...state }
+      const layers = this.motionLayers.get(id) ?? []
+      for (const layer of layers) {
+        output.x += layer.x
+        output.y += layer.y
+        output.rotation += layer.rotation
+        output.scaleX *= layer.scale
+        output.scaleY *= layer.scale
+        output.alpha = clamp(output.alpha + layer.opacity, 0, 1)
+      }
+      this.composedStates.set(id, output)
+    })
+    this.renderer.applyRuntime(this.composedStates)
   }
 
   private baseState(element: EditorElement): RuntimeState {
@@ -255,7 +311,7 @@ export class TimelineEngine {
     this.stopPreview(false)
     this.time = clamp(time, 0, this.scene.duration)
     this.timeline.pause().seek(this.time, false)
-    this.renderer.applyRuntime(this.states)
+    this.applyComposedRuntime()
     this.renderer.setMediaTime?.(this.time)
     this.renderer.renderNow?.()
     this.onTimeChange?.(this.time)
@@ -289,9 +345,11 @@ export class TimelineEngine {
     else this.play()
   }
 
-  previewSegment(element: EditorElement, phase: 'enter' | 'hold' | 'exit') {
+  previewAnimation(element: EditorElement, animationId: string) {
     if (!this.timeline) return
-    const clip = element.animations.find((item) => item.phase === phase)
+    const standard = element.animations.find((item) => item.id === animationId)
+    const motion = getMotionClips(element).find((item) => item.id === animationId)
+    const clip = standard ?? motion
     if (!clip) return
     const start = element.start + clip.offset
     const end = Math.min(element.start + element.duration, start + clip.duration)
@@ -321,6 +379,8 @@ export class TimelineEngine {
     this.timeline?.kill()
     this.timeline = null
     this.states.clear()
+    this.composedStates.clear()
+    this.motionLayers.clear()
   }
 
   private setPlaying(value: boolean) {
