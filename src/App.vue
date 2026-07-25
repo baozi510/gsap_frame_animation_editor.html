@@ -7,6 +7,7 @@ import {
   Redo2,
   Settings,
   Undo2,
+  Upload,
   ZoomIn,
   ZoomOut,
 } from '@lucide/vue'
@@ -16,6 +17,7 @@ import InspectorPanel from '@/components/InspectorPanel.vue'
 import TimelinePanel from '@/components/TimelinePanel.vue'
 import ExportDialog from '@/components/ExportDialog.vue'
 import SettingsDialog from '@/components/SettingsDialog.vue'
+import UploadDialog from '@/components/UploadDialog.vue'
 import { editorStore } from '@/store/editorStore'
 import { ExportEngine } from '@/engine/ExportEngine'
 import type { ExportProgress, Project } from '@/types/editor'
@@ -29,6 +31,7 @@ const loop = ref(false)
 const zoom = ref(1)
 const projectInput = ref<HTMLInputElement | null>(null)
 const settingsOpen = ref(false)
+const uploadOpen = ref(false)
 const alignMenuOpen = ref(false)
 const timelineHeight = ref(300)
 const exportSupported = ref<boolean | null>(null)
@@ -133,6 +136,11 @@ function closeExport() {
   exportProgress.active = false
 }
 
+function openUploadSettings() {
+  uploadOpen.value = false
+  settingsOpen.value = true
+}
+
 function startTimelineResize(event: PointerEvent) {
   if (event.button !== 0) return
   timelineResize = { pointerId: event.pointerId, startY: event.clientY, startHeight: timelineHeight.value }
@@ -233,6 +241,7 @@ onUnmounted(() => {
       <input ref="projectInput" hidden type="file" accept="application/json" @change="onProjectInputChange" />
       <button class="top-button" @click="projectInput?.click()">导入</button>
       <button class="top-button" @click="saveProjectFile">项目</button>
+      <button class="top-button upload-top-button" @click="uploadOpen = true"><Upload :size="14" />上传素材</button>
       <button
         class="top-button export-button"
         :disabled="exportSupported === false"
@@ -243,7 +252,7 @@ onUnmounted(() => {
     </header>
 
     <section class="workspace capcut-workspace">
-      <LeftPanel :current-time="currentTime" />
+      <LeftPanel :current-time="currentTime" @upload="uploadOpen = true" />
 
       <section class="canvas-column">
         <CanvasEditor
@@ -273,5 +282,6 @@ onUnmounted(() => {
     <div v-if="editorStore.toastMessage.value" class="toast">{{ editorStore.toastMessage.value }}</div>
     <ExportDialog :progress="exportProgress" @close="closeExport" />
     <SettingsDialog :open="settingsOpen" @close="settingsOpen = false" />
+    <UploadDialog :open="uploadOpen" @close="uploadOpen = false" @settings="openUploadSettings" />
   </main>
 </template>
