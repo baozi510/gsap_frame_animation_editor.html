@@ -1,6 +1,5 @@
 import {
   Application,
-  Assets,
   Container,
   Graphics,
   Rectangle,
@@ -106,7 +105,10 @@ export class PixiEditorRenderer {
     const elements = [...this.getScene().elements].sort((a, b) => a.z - b.z)
     for (const element of elements) {
       const node = await this.createNode(element)
-      if (token !== this.renderToken) return
+      if (token !== this.renderToken) {
+        node.container.destroy({ children: true })
+        return
+      }
       this.sceneLayer.addChild(node.container)
       this.nodes.set(element.id, node)
     }
@@ -127,7 +129,7 @@ export class PixiEditorRenderer {
     video.muted = true
     video.playsInline = true
     video.preload = 'auto'
-    video.crossOrigin = 'anonymous'
+    if (!source.startsWith('blob:') && !source.startsWith('data:')) video.crossOrigin = 'anonymous'
     await new Promise<void>((resolve, reject) => {
       const timer = window.setTimeout(() => reject(new Error('视频素材加载超时')), 15000)
       video.addEventListener('loadeddata', () => {
@@ -144,6 +146,27 @@ export class PixiEditorRenderer {
     return video
   }
 
+  private async createImageTexture(source: string) {
+    const image = document.createElement('img')
+    image.decoding = 'async'
+    if (!source.startsWith('blob:') && !source.startsWith('data:')) image.crossOrigin = 'anonymous'
+    await new Promise<void>((resolve, reject) => {
+      const timer = window.setTimeout(() => reject(new Error('图片素材加载超时')), 15000)
+      image.addEventListener('load', () => {
+        window.clearTimeout(timer)
+        if (!image.naturalWidth || !image.naturalHeight) reject(new Error('图片素材尺寸无效'))
+        else resolve()
+      }, { once: true })
+      image.addEventListener('error', () => {
+        window.clearTimeout(timer)
+        reject(new Error('图片素材无法解码'))
+      }, { once: true })
+      image.src = source
+    })
+    if (typeof image.decode === 'function') await image.decode().catch(() => undefined)
+    return Texture.from(image)
+  }
+
   private async createNode(element: EditorElement): Promise<RenderNode> {
     const container = new Container()
     container.label = element.id
@@ -154,16 +177,15 @@ export class PixiEditorRenderer {
     let visual: Sprite | Graphics | Text
     let video: HTMLVideoElement | undefined
     if (element.type === 'image' || element.type === 'video') {
-      let texture = Texture.WHITE
+      let texture: Texture = Texture.WHITE
       try {
         const source = await this.resolveElementSource(element)
-        if (source) {
-          if (element.type === 'video') {
-            video = await this.createVideo(source)
-            texture = Texture.from(video)
-          } else {
-            texture = await Assets.load(source)
-          }
+        if (!source) throw new Error(`素材没有可用地址：${element.name}`)
+        if (element.type === 'video') {
+          video = await this.createVideo(source)
+          texture = Texture.from(video)
+        } else {
+          texture = await this.createImageTexture(source)
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : `素材加载失败：${element.name}`
@@ -171,7 +193,7 @@ export class PixiEditorRenderer {
         this.callbacks.onAssetError?.(message)
         texture = Texture.WHITE
       }
-      const sprite = new Sprite(texture)
+      const sprite = new Sprite(texture || Texture.WHITE)
       sprite.anchor.set(0.5)
       sprite.width = element.width
       sprite.height = element.height
