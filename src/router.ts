@@ -1,5 +1,5 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
-import EditorPage from '@/pages/EditorPage.vue'
+import EditorPage from '@/App.vue'
 import AssetLibraryRoute from '@/pages/AssetLibraryRoute.vue'
 
 export const router = createRouter({
