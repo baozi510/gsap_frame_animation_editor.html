@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import {
-  ArrowLeft,
   CheckCircle2,
   FolderPlus,
   Image as ImageIcon,
@@ -70,7 +69,7 @@ watch(() => props.open, (open) => {
   if (!open) return
   configured.value = Boolean(getAssetApiBase())
   if (configured.value) void loadFolderTree()
-  if (uploading.value || queue.value.some((item) => item.status === 'uploading' || item.status === 'success' || (item.status === 'error' && item.retryable))) step.value = 'progress'
+  if (uploading.value || queue.value.some((item) => item.status === 'uploading' || item.status === 'success' || item.status === 'error')) step.value = 'progress'
   else step.value = 'select'
 })
 
@@ -95,15 +94,25 @@ function addFiles(files: File[]) {
   }
 }
 
+async function acceptFiles(files: File[]) {
+  if (!files.length || uploading.value) return
+  queue.value = []
+  addFiles(files)
+  if (!queue.value.length) return
+  step.value = 'progress'
+  await startUpload()
+}
+
 function onFileChange(event: Event) {
   const input = event.target as HTMLInputElement
-  addFiles(Array.from(input.files ?? []))
+  const files = Array.from(input.files ?? [])
   input.value = ''
+  void acceptFiles(files)
 }
 
 function onDrop(event: DragEvent) {
   dragActive.value = false
-  addFiles(Array.from(event.dataTransfer?.files ?? []))
+  void acceptFiles(Array.from(event.dataTransfer?.files ?? []))
 }
 
 async function collectFolders(parentId: string | null, depth: number, seen: Set<string>, output: FolderOption[]) {
@@ -199,16 +208,6 @@ async function startUpload() {
   }
 }
 
-function beginUpload() {
-  if (!configured.value) {
-    emit('settings')
-    return
-  }
-  if (!uploadableCount.value) return
-  step.value = 'progress'
-  void startUpload()
-}
-
 async function retryItem(item: UploadQueueItem) {
   if (uploading.value || item.status !== 'error' || !item.retryable) return
   uploading.value = true
@@ -234,19 +233,6 @@ function resetBatch() {
   step.value = 'select'
 }
 
-function backToSelection() {
-  if (uploading.value) return
-  queue.value = queue.value.filter((item) => item.status !== 'success')
-  queue.value.forEach((item) => {
-    if (item.status === 'error' && item.retryable) {
-      item.status = 'pending'
-      item.retryable = false
-      item.error = undefined
-    }
-  })
-  step.value = 'select'
-}
-
 function close() {
   if (!uploading.value) emit('close')
 }
@@ -269,7 +255,7 @@ function statusLabel(item: UploadQueueItem) {
   <div v-if="open" class="upload-modal-backdrop" @mousedown.self="close">
     <section class="upload-dialog upload-dialog-steps" role="dialog" aria-modal="true" aria-label="上传素材">
       <header class="upload-dialog-head">
-        <div><strong>上传素材</strong><small>{{ step === 'select' ? '选择文件和目标目录' : '按列表顺序逐个上传' }}</small></div>
+        <div><strong>上传素材</strong><small>{{ step === 'select' ? '选择后将自动开始上传' : '按列表顺序逐个上传' }}</small></div>
         <div class="upload-step-indicator">
           <span :class="{ active: step === 'select', done: step === 'progress' }"><i>1</i>选择文件</span>
           <b />
@@ -286,7 +272,7 @@ function statusLabel(item: UploadQueueItem) {
       </div>
 
       <template v-else-if="step === 'select'">
-        <div class="upload-step-body select-step">
+        <div class="upload-step-body select-step spacious-select-step">
           <section class="upload-target-card">
             <div class="upload-target-row">
               <label><span>上传到目录</span><select v-model="selectedFolderId" :disabled="folderLoading"><option value="">根目录</option><option v-for="folder in folderOptions" :key="folder.id" :value="folder.id">{{ '　'.repeat(folder.depth) }}{{ folder.name }}</option></select></label>
@@ -296,33 +282,24 @@ function statusLabel(item: UploadQueueItem) {
           </section>
 
           <input ref="fileInput" hidden multiple type="file" accept="image/*,video/*" @change="onFileChange" />
-          <button class="upload-drop-zone large" :class="{ active: dragActive }" @click="fileInput?.click()" @dragenter.prevent="dragActive = true" @dragover.prevent="dragActive = true" @dragleave.prevent="dragActive = false" @drop.prevent="onDrop">
-            <Upload :size="32" /><strong>拖拽文件到这里，或点击选择</strong><span>支持一次选择多张图片和多个视频</span>
+          <button class="upload-drop-zone large auto-upload-zone" :class="{ active: dragActive }" @click="fileInput?.click()" @dragenter.prevent="dragActive = true" @dragover.prevent="dragActive = true" @dragleave.prevent="dragActive = false" @drop.prevent="onDrop">
+            <Upload :size="46" />
+            <strong>拖拽图片或视频到这里</strong>
+            <span>也可以点击选择多个文件，检测到文件后自动开始上传</span>
+            <em>支持 JPG、PNG、WebP、GIF、MP4、WebM 等常见格式</em>
           </button>
-
-          <div class="upload-selection-head"><div><strong>已选择 {{ queue.length }} 个文件</strong><small>确认后进入上传进度页面</small></div><button v-if="queue.length" @click="resetBatch">清空</button></div>
-          <div v-if="!queue.length" class="upload-selection-empty">还没有选择文件</div>
-          <div v-else class="upload-selection-list">
-            <article v-for="item in queue" :key="item.id" :class="['upload-selection-item', { invalid: item.status === 'error' && !item.retryable }]">
-              <div class="upload-file-icon"><ImageIcon v-if="item.file.type.startsWith('image/')" :size="20" /><Video v-else :size="20" /></div>
-              <div class="upload-file-copy"><strong>{{ item.file.name }}</strong><small>{{ formatBytes(item.file.size) }}</small><span v-if="item.error">{{ item.error }}</span></div>
-              <button title="移除" @click="removeItem(item.id)"><Trash2 :size="14" /></button>
-            </article>
-          </div>
         </div>
-        <footer class="upload-dialog-actions"><button @click="close">取消</button><button class="primary" :disabled="!uploadableCount" @click="beginUpload"><Upload :size="15" />开始上传（{{ uploadableCount }}）</button></footer>
       </template>
 
       <template v-else>
         <div class="upload-step-body progress-step">
           <div class="upload-progress-summary">
-            <button :disabled="uploading" @click="backToSelection"><ArrowLeft :size="15" />返回选择</button>
             <div><strong>正在上传到：{{ targetFolderName }}</strong><small>{{ successCount }} 个成功 · {{ errorCount }} 个失败 · 共 {{ queue.length }} 个</small></div>
             <span>{{ progress }}%</span>
           </div>
           <div class="upload-progress-track wide"><i :style="{ width: `${progress}%` }" /></div>
 
-          <div v-if="!queue.length" class="upload-queue-empty"><CheckCircle2 :size="30" /><strong>上传列表为空</strong><span>返回第一步添加文件。</span></div>
+          <div v-if="!queue.length" class="upload-queue-empty"><CheckCircle2 :size="30" /><strong>上传列表为空</strong><span>选择另一批文件开始上传。</span></div>
           <div v-else class="upload-queue-list progress-list">
             <article v-for="item in queue" :key="item.id" class="upload-queue-item" :class="item.status">
               <div class="upload-file-icon"><ImageIcon v-if="item.file.type.startsWith('image/')" :size="20" /><Video v-else :size="20" /></div>
