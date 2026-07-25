@@ -7,5 +7,6 @@ import './editor-workflow.css'
 import './workflow-v4.css'
 import './workflow-v5.css'
 import './motion-animations.css'
+import './capcut-layout.css'
 
 createApp(App).mount('#app')
