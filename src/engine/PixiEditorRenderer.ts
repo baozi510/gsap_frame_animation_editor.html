@@ -12,6 +12,7 @@ import {
 import type { EditorElement, Project, RuntimeState, Scene } from '@/types/editor'
 import { resolveAssetSource } from '@/services/assets'
 import { clamp, degrees, radians } from '@/utils/helpers'
+import { resizeFromHandle, type ResizeHandleName, type ResizeSnapshot } from '@/utils/eightPointResize'
 
 interface RenderNode {
   container: Container
@@ -26,6 +27,8 @@ interface DragState {
   startY?: number
   x?: number
   y?: number
+  resizeHandle?: ResizeHandleName
+  resizeSnapshot?: ResizeSnapshot
   before: string
 }
 
@@ -35,6 +38,17 @@ export interface RendererCallbacks {
   onTransformLive?: (id: string, updater: (element: EditorElement) => void) => void
   onTransformEnd?: (before: string) => void
   onAssetError?: (message: string) => void
+}
+
+const HANDLE_CURSORS: Record<ResizeHandleName, string> = {
+  nw: 'nwse-resize',
+  n: 'ns-resize',
+  ne: 'nesw-resize',
+  e: 'ew-resize',
+  se: 'nwse-resize',
+  s: 'ns-resize',
+  sw: 'nesw-resize',
+  w: 'ew-resize',
 }
 
 export class PixiEditorRenderer {
@@ -48,7 +62,7 @@ export class PixiEditorRenderer {
   private nodes = new Map<string, RenderNode>()
   private selection = new Container()
   private border = new Graphics()
-  private resizeHandle = new Graphics()
+  private resizeHandles = new Map<ResizeHandleName, Graphics>()
   private rotateHandle = new Graphics()
   private drag: DragState | null = null
   private renderToken = 0
@@ -234,15 +248,25 @@ export class PixiEditorRenderer {
   private createSelectionControls() {
     this.selection.visible = false
     this.selection.eventMode = 'passive'
-    this.resizeHandle.rect(-13, -13, 26, 26).fill('#7a61ff').stroke({ color: '#ffffff', width: 3 })
+
+    const handleNames: ResizeHandleName[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']
+    for (const name of handleNames) {
+      const handle = new Graphics()
+      const corner = name.length === 2
+      const size = corner ? 22 : 18
+      handle.rect(-size / 2, -size / 2, size, size).fill('#7a61ff').stroke({ color: '#ffffff', width: 2 })
+      handle.eventMode = 'static'
+      handle.cursor = HANDLE_CURSORS[name]
+      handle.on('pointerdown', (event) => this.beginResize(event, name))
+      this.resizeHandles.set(name, handle)
+      this.selection.addChild(handle)
+    }
+
     this.rotateHandle.circle(0, 0, 15).fill('#7a61ff').stroke({ color: '#ffffff', width: 3 })
-    this.resizeHandle.eventMode = 'static'
     this.rotateHandle.eventMode = 'static'
-    this.resizeHandle.cursor = 'nwse-resize'
     this.rotateHandle.cursor = 'grab'
-    this.resizeHandle.on('pointerdown', (event) => this.beginControl(event, 'resize'))
     this.rotateHandle.on('pointerdown', (event) => this.beginControl(event, 'rotate'))
-    this.selection.addChild(this.border, this.resizeHandle, this.rotateHandle)
+    this.selection.addChild(this.border, this.rotateHandle)
     this.controlLayer.addChild(this.selection)
   }
 
@@ -275,7 +299,26 @@ export class PixiEditorRenderer {
     this.updateSelection()
   }
 
-  private beginControl(event: FederatedPointerEvent, type: 'resize' | 'rotate') {
+  private beginResize(event: FederatedPointerEvent, handle: ResizeHandleName) {
+    event.stopPropagation()
+    const selectedId = this.getSelectedId()
+    const element = this.getScene().elements.find((item) => item.id === selectedId)
+    if (!element || element.locked) return
+    this.drag = {
+      type: 'resize',
+      resizeHandle: handle,
+      resizeSnapshot: {
+        x: element.x,
+        y: element.y,
+        width: Math.max(1, element.width),
+        height: Math.max(1, element.height),
+        rotation: radians(element.rotation),
+      },
+      before: this.callbacks.onTransformStart?.() ?? '',
+    }
+  }
+
+  private beginControl(event: FederatedPointerEvent, type: 'rotate') {
     event.stopPropagation()
     const selectedId = this.getSelectedId()
     const element = this.getScene().elements.find((item) => item.id === selectedId)
@@ -296,15 +339,12 @@ export class PixiEditorRenderer {
         target.x = (this.drag.x ?? target.x) + pointer.x - (this.drag.startX ?? pointer.x)
         target.y = (this.drag.y ?? target.y) + pointer.y - (this.drag.startY ?? pointer.y)
       }
-      if (this.drag?.type === 'resize') {
-        const dx = pointer.x - target.x
-        const dy = pointer.y - target.y
-        const cos = Math.cos(-radians(target.rotation))
-        const sin = Math.sin(-radians(target.rotation))
-        const localX = dx * cos - dy * sin
-        const localY = dx * sin + dy * cos
-        target.width = Math.max(40, Math.abs(localX) * 2)
-        target.height = Math.max(40, Math.abs(localY) * 2)
+      if (this.drag?.type === 'resize' && this.drag.resizeHandle && this.drag.resizeSnapshot) {
+        const next = resizeFromHandle(this.drag.resizeSnapshot, this.drag.resizeHandle, pointer.x, pointer.y)
+        target.x = next.x
+        target.y = next.y
+        target.width = next.width
+        target.height = next.height
       }
       if (this.drag?.type === 'rotate') {
         target.rotation = Math.round(degrees(Math.atan2(pointer.y - target.y, pointer.x - target.x)) + 90)
@@ -417,7 +457,19 @@ export class PixiEditorRenderer {
     this.selection.rotation = node.container.rotation
     this.selection.scale.set(1)
     this.border.clear().rect(-element.width / 2, -element.height / 2, element.width, element.height).stroke({ color: '#7a61ff', width: 4, pixelLine: true })
-    this.resizeHandle.position.set(element.width / 2, element.height / 2)
+
+    const positions: Record<ResizeHandleName, [number, number]> = {
+      nw: [-element.width / 2, -element.height / 2],
+      n: [0, -element.height / 2],
+      ne: [element.width / 2, -element.height / 2],
+      e: [element.width / 2, 0],
+      se: [element.width / 2, element.height / 2],
+      s: [0, element.height / 2],
+      sw: [-element.width / 2, element.height / 2],
+      w: [-element.width / 2, 0],
+    }
+    for (const [name, handle] of this.resizeHandles) handle.position.set(...positions[name])
+
     this.rotateHandle.position.set(0, -element.height / 2 - 48)
     this.renderNow()
   }
