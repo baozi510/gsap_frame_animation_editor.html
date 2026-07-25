@@ -10,6 +10,7 @@ import './workflow-v5.css'
 import './motion-animations.css'
 import './capcut-layout.css'
 import './upload-dialog.css'
+import './upload-auto-layout.css'
 import './asset-manager.css'
 
 createApp(RootApp).use(router).mount('#app')
