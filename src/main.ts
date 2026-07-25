@@ -12,5 +12,6 @@ import './capcut-layout.css'
 import './upload-dialog.css'
 import './upload-auto-layout.css'
 import './asset-manager.css'
+import './polish-v13.css'
 
 createApp(RootApp).use(router).mount('#app')
