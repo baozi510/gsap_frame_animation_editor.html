@@ -8,10 +8,24 @@ interface ApiEnvelope<T> {
 }
 
 function unwrap<T>(payload: T | ApiEnvelope<T>): T {
-  if (payload && typeof payload === 'object' && 'data' in payload && (payload as ApiEnvelope<T>).data !== undefined) {
+  if (payload && typeof payload === 'object' && 'data' in payload) {
     return (payload as ApiEnvelope<T>).data as T
   }
   return payload as T
+}
+
+function normalizeList<T>(payload: unknown, preferredKeys: string[] = []): T[] {
+  if (Array.isArray(payload)) return payload as T[]
+  if (!payload || typeof payload !== 'object') return []
+
+  const record = payload as Record<string, unknown>
+  if ('data' in record) return normalizeList<T>(record.data, preferredKeys)
+
+  const keys = [...preferredKeys, 'items', 'results', 'list']
+  for (const key of keys) {
+    if (key in record) return normalizeList<T>(record[key], preferredKeys)
+  }
+  return []
 }
 
 export function getAssetApiBase() {
@@ -53,25 +67,37 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(message || `素材接口请求失败（${response.status}）`)
   }
   if (response.status === 204) return undefined as T
-  return unwrap<T>(await response.json() as T | ApiEnvelope<T>)
+
+  const text = await response.text()
+  if (!text.trim()) return undefined as T
+
+  try {
+    return unwrap<T>(JSON.parse(text) as T | ApiEnvelope<T>)
+  } catch {
+    throw new Error('素材接口返回了无法识别的数据')
+  }
 }
 
-export async function listAssetFolders(parentId?: string | null) {
+export async function listAssetFolders(parentId?: string | null): Promise<AssetFolder[]> {
   const query = parentId ? `?parentId=${encodeURIComponent(parentId)}` : ''
-  return request<AssetFolder[]>(`/api/v1/folders${query}`)
+  const payload = await request<unknown>(`/api/v1/folders${query}`)
+  return normalizeList<AssetFolder>(payload, ['folders'])
 }
 
 export async function createAssetFolder(name: string, parentId?: string | null) {
-  return request<AssetFolder>('/api/v1/folders', {
+  const folder = await request<AssetFolder>('/api/v1/folders', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name, parentId: parentId ?? null }),
   })
+  if (!folder?.id) throw new Error('目录创建成功，但接口没有返回目录信息')
+  return folder
 }
 
-export async function listRemoteAssets(folderId?: string | null) {
+export async function listRemoteAssets(folderId?: string | null): Promise<ProjectAsset[]> {
   const query = folderId ? `?folderId=${encodeURIComponent(folderId)}` : ''
-  return request<ProjectAsset[]>(`/api/v1/assets${query}`)
+  const payload = await request<unknown>(`/api/v1/assets${query}`)
+  return normalizeList<ProjectAsset>(payload, ['assets'])
 }
 
 export async function getRemoteAsset(assetId: string) {
@@ -82,10 +108,12 @@ export async function uploadRemoteAsset(file: File, folderId?: string | null) {
   const form = new FormData()
   form.append('file', file)
   if (folderId) form.append('folderId', folderId)
-  return request<ProjectAsset>('/api/v1/assets', {
+  const asset = await request<ProjectAsset>('/api/v1/assets', {
     method: 'POST',
     body: form,
   })
+  if (!asset?.id) throw new Error('上传完成，但接口没有返回素材信息')
+  return asset
 }
 
 export async function deleteRemoteAsset(assetId: string) {
