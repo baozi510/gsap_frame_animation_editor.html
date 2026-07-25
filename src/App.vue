@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import {
   AlignHorizontalJustifyCenter,
   ChevronDown,
+  FolderKanban,
   Maximize2,
   Redo2,
   Settings,
@@ -18,6 +19,7 @@ import TimelinePanel from '@/components/TimelinePanel.vue'
 import ExportDialog from '@/components/ExportDialog.vue'
 import SettingsDialog from '@/components/SettingsDialog.vue'
 import UploadDialog from '@/components/UploadDialog.vue'
+import AssetManagerPage from '@/components/AssetManagerPage.vue'
 import { editorStore } from '@/store/editorStore'
 import { ExportEngine } from '@/engine/ExportEngine'
 import type { ExportProgress, Project } from '@/types/editor'
@@ -32,6 +34,7 @@ const zoom = ref(1)
 const projectInput = ref<HTMLInputElement | null>(null)
 const settingsOpen = ref(false)
 const uploadOpen = ref(false)
+const assetManagerOpen = ref(false)
 const alignMenuOpen = ref(false)
 const timelineHeight = ref(300)
 const exportSupported = ref<boolean | null>(null)
@@ -141,6 +144,11 @@ function openUploadSettings() {
   settingsOpen.value = true
 }
 
+function openAssetManager() {
+  canvas.value?.pause()
+  assetManagerOpen.value = true
+}
+
 function startTimelineResize(event: PointerEvent) {
   if (event.button !== 0) return
   timelineResize = { pointerId: event.pointerId, startY: event.clientY, startHeight: timelineHeight.value }
@@ -167,6 +175,7 @@ function stopTimelineResize(event?: PointerEvent) {
 }
 
 function keyboard(event: KeyboardEvent) {
+  if (assetManagerOpen.value || uploadOpen.value || settingsOpen.value || exportProgress.active) return
   const target = event.target as HTMLElement | null
   if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return
   if (event.code === 'Space') {
@@ -213,21 +222,12 @@ onUnmounted(() => {
       <button class="icon-button" :disabled="!editorStore.future.value.length" title="重做" aria-label="重做" @click="editorStore.redo"><Redo2 :size="16" /></button>
 
       <div class="ratio-group">
-        <button
-          v-for="ratio in ratios"
-          :key="ratio.label"
-          :class="{ active: ratioKey === `${ratio.width}x${ratio.height}` }"
-          @click="changeCanvasRatio(ratio.width, ratio.height)"
-        >{{ ratio.label }}</button>
+        <button v-for="ratio in ratios" :key="ratio.label" :class="{ active: ratioKey === `${ratio.width}x${ratio.height}` }" @click="changeCanvasRatio(ratio.width, ratio.height)">{{ ratio.label }}</button>
       </div>
 
       <div class="toolbar-popover-wrap">
-        <button class="top-command-button" :disabled="!editorStore.selectedElement.value" @click="alignMenuOpen = !alignMenuOpen">
-          <AlignHorizontalJustifyCenter :size="15" /><span>对齐</span><ChevronDown :size="13" />
-        </button>
-        <div v-if="alignMenuOpen" class="toolbar-popover align-popover">
-          <button v-for="option in alignOptions" :key="option.mode" @click="applyAlignment(option.mode)">{{ option.label }}</button>
-        </div>
+        <button class="top-command-button" :disabled="!editorStore.selectedElement.value" @click="alignMenuOpen = !alignMenuOpen"><AlignHorizontalJustifyCenter :size="15" /><span>对齐</span><ChevronDown :size="13" /></button>
+        <div v-if="alignMenuOpen" class="toolbar-popover align-popover"><button v-for="option in alignOptions" :key="option.mode" @click="applyAlignment(option.mode)">{{ option.label }}</button></div>
       </div>
 
       <div class="top-icon-group top-zoom-group">
@@ -241,47 +241,25 @@ onUnmounted(() => {
       <input ref="projectInput" hidden type="file" accept="application/json" @change="onProjectInputChange" />
       <button class="top-button" @click="projectInput?.click()">导入</button>
       <button class="top-button" @click="saveProjectFile">项目</button>
+      <button class="top-button" @click="openAssetManager"><FolderKanban :size="14" />素材管理</button>
       <button class="top-button upload-top-button" @click="uploadOpen = true"><Upload :size="14" />上传素材</button>
-      <button
-        class="top-button export-button"
-        :disabled="exportSupported === false"
-        :title="exportSupported === false ? '当前浏览器不支持 H.264 WebCodecs' : '按场景顺序导出完整 MP4'"
-        @click="exportMp4"
-      >导出</button>
+      <button class="top-button export-button" :disabled="exportSupported === false" :title="exportSupported === false ? '当前浏览器不支持 H.264 WebCodecs' : '按场景顺序导出完整 MP4'" @click="exportMp4">导出</button>
       <button class="settings-trigger" title="设置" aria-label="设置" @click="settingsOpen = true"><Settings :size="17" /></button>
     </header>
 
     <section class="workspace capcut-workspace">
       <LeftPanel :current-time="currentTime" @upload="uploadOpen = true" />
-
-      <section class="canvas-column">
-        <CanvasEditor
-          ref="canvas"
-          :zoom="zoom"
-          @time="currentTime = $event"
-          @playing="playing = $event"
-        />
-      </section>
-
+      <section class="canvas-column"><CanvasEditor ref="canvas" :zoom="zoom" @time="currentTime = $event" @playing="playing = $event" /></section>
       <InspectorPanel @live="syncSelected" @preview="preview" />
     </section>
 
     <div class="timeline-resizer" title="拖动调整时间轴高度" @pointerdown="startTimelineResize"><i /></div>
-
-    <TimelinePanel
-      :current-time="currentTime"
-      :playing="playing"
-      :loop="loop"
-      @seek="seek"
-      @toggle="canvas?.toggle()"
-      @frame="frame"
-      @loop="toggleLoop"
-      @preview="preview"
-    />
+    <TimelinePanel :current-time="currentTime" :playing="playing" :loop="loop" @seek="seek" @toggle="canvas?.toggle()" @frame="frame" @loop="toggleLoop" @preview="preview" />
 
     <div v-if="editorStore.toastMessage.value" class="toast">{{ editorStore.toastMessage.value }}</div>
     <ExportDialog :progress="exportProgress" @close="closeExport" />
     <SettingsDialog :open="settingsOpen" @close="settingsOpen = false" />
     <UploadDialog :open="uploadOpen" @close="uploadOpen = false" @settings="openUploadSettings" />
+    <AssetManagerPage v-if="assetManagerOpen" :current-time="currentTime" @back="assetManagerOpen = false" @upload="uploadOpen = true" @settings="settingsOpen = true" />
   </main>
 </template>
