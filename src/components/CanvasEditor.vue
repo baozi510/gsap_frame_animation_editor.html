@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { editorStore } from '@/store/editorStore'
 import { PixiEditorRenderer } from '@/engine/PixiEditorRenderer'
 import { TimelineEngine } from '@/engine/TimelineEngine'
+import type { EditorElement } from '@/types/editor'
 
 const props = withDefaults(defineProps<{ zoom: number; initialTime?: number }>(), { initialTime: 0 })
 const emit = defineEmits<{
@@ -57,7 +58,7 @@ function beginTransform() {
   return JSON.stringify(editorStore.project)
 }
 
-function applyTransform(id: string, updater: (element: typeof editorStore.currentScene.value.elements[number]) => void) {
+function applyTransform(id: string, updater: (element: EditorElement) => void) {
   const element = editorStore.currentScene.value.elements.find((item) => item.id === id)
   if (!element) return
 
