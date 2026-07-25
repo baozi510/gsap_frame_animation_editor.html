@@ -23,19 +23,15 @@ import {
   Trash2,
   Type,
   Unlock,
-  Upload,
 } from '@lucide/vue'
 import { demoAssets } from '@/utils/assets'
 import { editorStore } from '@/store/editorStore'
 import type { AssetFolder, MotionClip, ProjectAsset } from '@/types/editor'
 import {
-  cacheAssetBlob,
-  createAssetFolder,
   getAssetApiBase,
   hasCachedAsset,
   listAssetFolders,
   listRemoteAssets,
-  uploadRemoteAsset,
 } from '@/services/assets'
 import {
   addExitToAllElements,
@@ -60,15 +56,13 @@ interface LayerPointerDrag {
 type LeftSection = 'assets' | 'text' | 'shapes' | 'animation' | 'scenes' | 'layers'
 
 const props = defineProps<{ currentTime: number }>()
+const emit = defineEmits<{ upload: [] }>()
 const section = ref<LeftSection>('assets')
-const fileInput = ref<HTMLInputElement | null>(null)
 const apiConfigured = ref(Boolean(getAssetApiBase()))
 const loadingAssets = ref(false)
-const uploading = ref(false)
 const folders = ref<AssetFolder[]>([])
 const assets = ref<ProjectAsset[]>([])
 const currentFolderId = ref<string | null>(null)
-const newFolderName = ref('')
 const cachedMap = ref<Record<string, boolean>>({})
 const draggedLayerId = ref<string | null>(null)
 const dragOverLayerId = ref<string | null>(null)
@@ -88,16 +82,12 @@ const currentFolder = computed(() => folders.value.find((folder) => folder.id ==
 const totalDuration = computed(() => getProjectDuration())
 const orderedLayers = computed(() => [...editorStore.currentScene.value.elements].sort((a, b) => b.z - a.z))
 
-function onUploadChange(event: Event) {
-  const input = event.target as HTMLInputElement
-  void uploadFiles(Array.from(input.files ?? []))
-}
-
 async function loadLibrary() {
   apiConfigured.value = Boolean(getAssetApiBase())
   if (!apiConfigured.value) {
     folders.value = []
     assets.value = []
+    cachedMap.value = {}
     return
   }
   loadingAssets.value = true
@@ -106,11 +96,17 @@ async function loadLibrary() {
       listAssetFolders(null),
       listRemoteAssets(currentFolderId.value),
     ])
-    folders.value = folderResult
-    assets.value = assetResult
-    const states = await Promise.all(assetResult.map(async (asset) => [asset.id, await hasCachedAsset(asset)] as const))
+    folders.value = Array.isArray(folderResult) ? folderResult.filter((folder) => Boolean(folder?.id)) : []
+    assets.value = Array.isArray(assetResult) ? assetResult.filter((asset) => Boolean(asset?.id)) : []
+    if (currentFolderId.value && !folders.value.some((folder) => folder.id === currentFolderId.value)) {
+      currentFolderId.value = null
+    }
+    const states = await Promise.all(assets.value.map(async (asset) => [asset.id, await hasCachedAsset(asset)] as const))
     cachedMap.value = Object.fromEntries(states)
   } catch (error) {
+    folders.value = []
+    assets.value = []
+    cachedMap.value = {}
     editorStore.notify(error instanceof Error ? error.message : '素材接口连接失败')
   } finally {
     loadingAssets.value = false
@@ -120,50 +116,6 @@ async function loadLibrary() {
 async function openFolder(folderId: string | null) {
   currentFolderId.value = folderId
   await loadLibrary()
-}
-
-async function createFolder() {
-  const name = newFolderName.value.trim()
-  if (!name) return
-  if (!apiConfigured.value) {
-    editorStore.notify('请点击右上角设置素材服务器')
-    return
-  }
-  try {
-    await createAssetFolder(name, currentFolderId.value)
-    newFolderName.value = ''
-    await loadLibrary()
-    editorStore.notify('素材文件夹已创建')
-  } catch (error) {
-    editorStore.notify(error instanceof Error ? error.message : '创建文件夹失败')
-  }
-}
-
-async function uploadFiles(files: File[]) {
-  if (!files.length) return
-  if (!getAssetApiBase()) {
-    editorStore.notify('请点击右上角设置素材服务器')
-    return
-  }
-  uploading.value = true
-  try {
-    for (const file of files) {
-      if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) {
-        editorStore.notify(`不支持的素材类型：${file.name}`)
-        continue
-      }
-      const asset = await uploadRemoteAsset(file, currentFolderId.value)
-      await cacheAssetBlob(asset, file)
-      editorStore.upsertProjectAsset(asset)
-    }
-    await loadLibrary()
-    editorStore.notify('素材上传完成')
-  } catch (error) {
-    editorStore.notify(error instanceof Error ? error.message : '素材上传失败')
-  } finally {
-    uploading.value = false
-    if (fileInput.value) fileInput.value.value = ''
-  }
 }
 
 function addAsset(asset: ProjectAsset) {
@@ -281,13 +233,19 @@ function onAssetSettingsChanged() {
   void loadLibrary()
 }
 
+function onAssetLibraryChanged() {
+  void loadLibrary()
+}
+
 onMounted(() => {
   window.addEventListener('motionframe:asset-settings', onAssetSettingsChanged)
+  window.addEventListener('motionframe:asset-library-changed', onAssetLibraryChanged)
   if (apiConfigured.value) void loadLibrary()
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('motionframe:asset-settings', onAssetSettingsChanged)
+  window.removeEventListener('motionframe:asset-library-changed', onAssetLibraryChanged)
   cleanupLayerPointer()
 })
 </script>
@@ -316,28 +274,26 @@ onBeforeUnmount(() => {
       </header>
 
       <div v-if="section === 'assets'" class="panel-scroll asset-panel capcut-resource-panel">
-        <input ref="fileInput" hidden multiple type="file" accept="image/*,video/*" @change="onUploadChange" />
-        <button class="compact-upload-button" :disabled="uploading" @click="fileInput?.click()">
-          <Upload :size="15" />
-          <span>{{ uploading ? '正在上传…' : '上传图片或视频' }}</span>
-        </button>
-
         <div class="folder-toolbar">
           <button :class="{ active: currentFolderId === null }" @click="openFolder(null)">全部</button>
           <span v-if="currentFolder">/ {{ currentFolder.name }}</span>
         </div>
-        <div class="folder-create">
-          <input v-model="newFolderName" placeholder="新文件夹" @keyup.enter="createFolder" />
-          <button @click="createFolder"><Plus :size="14" /></button>
-        </div>
         <div v-if="folders.length" class="folder-list">
           <button v-for="folder in folders" :key="folder.id" :class="{ active: folder.id === currentFolderId }" @click="openFolder(folder.id)"><span>{{ folder.name }}</span></button>
         </div>
+        <div v-else-if="apiConfigured && !loadingAssets" class="folder-empty-hint">暂无素材目录，可在右上角上传窗口中新建。</div>
 
         <div class="section-label">素材库</div>
         <div v-if="loadingAssets" class="asset-empty">正在读取素材库…</div>
-        <div v-else-if="!apiConfigured" class="asset-empty">从右上角设置素材服务器</div>
-        <div v-else-if="!assets.length" class="asset-empty">当前文件夹暂无素材</div>
+        <div v-else-if="!apiConfigured" class="asset-empty asset-empty-detailed">
+          <strong>尚未配置素材服务器</strong>
+          <span>从右上角设置中填写 API 地址。</span>
+        </div>
+        <div v-else-if="!assets.length" class="asset-empty asset-empty-detailed">
+          <strong>{{ currentFolder ? '当前目录暂无素材' : '素材库还是空的' }}</strong>
+          <span>点击右上角“上传素材”，可以多选并按队列逐个上传。</span>
+          <button @click="emit('upload')">上传素材</button>
+        </div>
         <div v-else class="asset-grid remote-asset-grid">
           <button v-for="asset in assets" :key="asset.id" class="asset-card remote-asset-card" @click="addAsset(asset)">
             <img v-if="asset.type === 'image' && (asset.thumbnailUrl || asset.downloadUrl)" :src="asset.thumbnailUrl || asset.downloadUrl" :alt="asset.name" />
