@@ -32,6 +32,7 @@ function rotateLocal(x: number, y: number, rotation: number) {
   return { x: x * cos - y * sin, y: x * sin + y * cos }
 }
 
+// Corners scale both dimensions proportionally; side handles resize one axis only.
 export function resizeFromHandle(
   snapshot: ResizeSnapshot,
   handle: ResizeHandleName,
