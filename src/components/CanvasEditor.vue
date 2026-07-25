@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { editorStore } from '@/store/editorStore'
 import { PixiEditorRenderer } from '@/engine/PixiEditorRenderer'
 import { TimelineEngine } from '@/engine/TimelineEngine'
+import type { EditorElement } from '@/types/editor'
 
 const props = withDefaults(defineProps<{ zoom: number; initialTime?: number }>(), { initialTime: 0 })
 const emit = defineEmits<{
@@ -20,6 +21,7 @@ let renderer: PixiEditorRenderer | null = null
 let timeline: TimelineEngine | null = null
 let knownSceneId = ''
 let knownElementIds = new Set<string>()
+let transformAspect: { elementId: string; width: number; height: number } | null = null
 
 const shellStyle = computed(() => {
   const scale = Math.max(0.08, fitScale.value * props.zoom)
@@ -48,17 +50,43 @@ function visibleSeekTime(time: number) {
   return clamped <= 0 ? Math.min(duration, 0.000001) : Math.min(duration, clamped + 0.000001)
 }
 
+function beginTransform() {
+  const element = editorStore.selectedElement.value
+  transformAspect = element && (element.type === 'image' || element.type === 'video')
+    ? { elementId: element.id, width: Math.max(1, element.width), height: Math.max(1, element.height) }
+    : null
+  return JSON.stringify(editorStore.project)
+}
+
+function applyTransform(id: string, updater: (element: EditorElement) => void) {
+  const element = editorStore.currentScene.value.elements.find((item) => item.id === id)
+  if (!element) return
+
+  const previousWidth = element.width
+  const previousHeight = element.height
+  updater(element)
+
+  const source = transformAspect
+  const dimensionsChanged = Math.abs(element.width - previousWidth) > 0.001 || Math.abs(element.height - previousHeight) > 0.001
+  if (!source || source.elementId !== id || !dimensionsChanged) return
+
+  const widthScale = Math.max(0.001, element.width / source.width)
+  const heightScale = Math.max(0.001, element.height / source.height)
+  const minimumScale = Math.max(40 / source.width, 40 / source.height)
+  const scale = Math.max(minimumScale, widthScale, heightScale)
+  element.width = source.width * scale
+  element.height = source.height * scale
+}
+
 async function initialize() {
   if (!host.value) return
   renderer = new PixiEditorRenderer(editorStore.project, () => editorStore.currentScene.value, () => editorStore.selectedId.value)
   renderer.callbacks = {
     onSelect: (id) => editorStore.select(id),
-    onTransformStart: () => JSON.stringify(editorStore.project),
-    onTransformLive: (id, updater) => {
-      const element = editorStore.currentScene.value.elements.find((item) => item.id === id)
-      if (element) updater(element)
-    },
+    onTransformStart: beginTransform,
+    onTransformLive: applyTransform,
     onTransformEnd: (before) => {
+      transformAspect = null
       if (before !== JSON.stringify(editorStore.project)) editorStore.finishLiveEdit(before)
     },
     onAssetError: (message) => editorStore.notify(message),

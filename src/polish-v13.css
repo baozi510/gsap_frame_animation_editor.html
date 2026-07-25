@@ -1,0 +1,80 @@
+.capcut-topbar > .top-button,
+.capcut-topbar > .settings-trigger {
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+.capcut-topbar > .settings-trigger {
+  width: 30px;
+  min-width: 30px;
+  padding: 0;
+}
+
+.capcut-timeline {
+  grid-template-rows: 42px 30px minmax(0, 1fr);
+}
+
+.scene-sequence-track {
+  grid-template-columns: 228px minmax(0, 1fr);
+}
+
+.scene-track-label {
+  padding: 0 10px;
+  gap: 5px;
+}
+
+.scene-track-segments {
+  padding: 3px 7px;
+  gap: 3px;
+}
+
+.scene-track-segments button {
+  min-width: 72px;
+  height: 23px;
+  padding: 0 6px;
+  grid-template-columns: 15px minmax(0, 1fr) auto;
+  gap: 4px;
+  border-radius: 4px;
+}
+
+.scene-track-segments button b {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  font-size: 7px;
+}
+
+.scene-track-segments button span {
+  font-size: 7px;
+}
+
+.scene-track-segments button small {
+  font-size: 6px;
+}
+
+.timeline-label-row,
+.timeline-label-row .track-name {
+  text-align: left;
+}
+
+.timeline-label-row .track-name {
+  width: 100%;
+  display: block;
+  justify-self: start;
+}
+
+.asset-panel.capcut-resource-panel > .section-label:nth-last-child(2),
+.asset-panel.capcut-resource-panel > .asset-grid:last-child {
+  display: none !important;
+}
+
+@media (max-width: 1360px) {
+  .scene-sequence-track {
+    grid-template-columns: 205px minmax(0, 1fr);
+  }
+}
