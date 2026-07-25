@@ -4,6 +4,7 @@ import { editorStore } from '@/store/editorStore'
 import type { AnimationClip, AnimationPhase, EditorElement } from '@/types/editor'
 import { clamp, uid } from '@/utils/helpers'
 import {
+  getElementMaxDuration,
   getSceneContentEnd,
   refreshSceneDuration,
   setSceneAutoDuration,
@@ -23,6 +24,29 @@ let previewTimer = 0
 const selected = computed(() => editorStore.selectedElement.value)
 const selectedClip = computed(() => selected.value?.animations.find((clip) => clip.phase === animationPhase.value) ?? null)
 const sceneContentEnd = computed(() => getSceneContentEnd(editorStore.currentScene.value))
+const selectedDurationMax = computed(() => selected.value
+  ? getElementMaxDuration(selected.value, editorStore.currentScene.value)
+  : 0.1)
+const selectedStartMax = computed(() => editorStore.currentScene.value.autoDuration === false
+  ? Math.max(0, editorStore.currentScene.value.duration - 0.1)
+  : 600)
+const latestOtherEnd = computed(() => {
+  const selectedId = selected.value?.id
+  return editorStore.currentScene.value.elements.reduce((end, element) => {
+    if (element.id === selectedId) return end
+    return Math.max(end, element.start + element.duration)
+  }, 0)
+})
+const durationToLast = computed(() => {
+  if (!selected.value) return 0.1
+  const requested = Math.max(0.1, latestOtherEnd.value - selected.value.start)
+  return Math.min(requested, selectedDurationMax.value)
+})
+const canExtendToLast = computed(() => Boolean(
+  selected.value
+  && latestOtherEnd.value > selected.value.start + selected.value.duration + 0.001
+  && durationToLast.value > selected.value.duration + 0.001,
+))
 const enterPresets = [
   ['fade','淡入'], ['left','左侧滑入'], ['right','右侧滑入'], ['up','下方上浮'], ['down','上方落入'], ['pop','弹性放大'], ['zoom','镜头推进'], ['rotate','旋转进入'],
 ]
@@ -75,10 +99,18 @@ function topLeftValue(key: 'x' | 'y') {
     : selected.value.y - selected.value.height / 2
 }
 
+function clampElementAnimations(element: EditorElement) {
+  element.animations.forEach((clip) => {
+    clip.duration = clamp(clip.duration, 0.05, element.duration)
+    clip.offset = clamp(clip.offset, 0, Math.max(0, element.duration - clip.duration))
+  })
+}
+
 function updateNumber(key: 'x' | 'y' | 'width' | 'height' | 'rotation' | 'alpha' | 'start' | 'duration', value: string) {
   const numberValue = Number(value)
   if (!Number.isFinite(numberValue)) return
   commit((element) => {
+    const scene = editorStore.currentScene.value
     if (key === 'x') {
       element.x = numberValue + element.width / 2
     } else if (key === 'y') {
@@ -92,18 +124,27 @@ function updateNumber(key: 'x' | 'y' | 'width' | 'height' | 'rotation' | 'alpha'
       element.height = Math.max(1, numberValue)
       element.y = top + element.height / 2
     } else if (key === 'start') {
-      element.start = clamp(numberValue, 0, Math.max(0, editorStore.currentScene.value.duration - 0.1))
-      element.duration = clamp(element.duration, 0.1, Math.max(0.1, editorStore.currentScene.value.duration - element.start))
+      const maxStart = scene.autoDuration === false ? Math.max(0, scene.duration - 0.1) : 600
+      element.start = clamp(numberValue, 0, maxStart)
+      if (scene.autoDuration === false) {
+        element.duration = clamp(element.duration, 0.1, Math.max(0.1, scene.duration - element.start))
+        clampElementAnimations(element)
+      }
     } else if (key === 'duration') {
-      element.duration = clamp(numberValue, 0.1, Math.max(0.1, editorStore.currentScene.value.duration - element.start))
-      element.animations.forEach((clip) => {
-        clip.duration = clamp(clip.duration, 0.05, element.duration)
-        clip.offset = clamp(clip.offset, 0, Math.max(0, element.duration - clip.duration))
-      })
+      element.duration = clamp(numberValue, 0.1, getElementMaxDuration(element, scene))
+      clampElementAnimations(element)
     } else {
       element[key] = numberValue
     }
   }, key === 'start' || key === 'duration')
+}
+
+function extendSelectedToLast() {
+  if (!selected.value || !canExtendToLast.value) return
+  commit((element) => {
+    element.duration = durationToLast.value
+    clampElementAnimations(element)
+  }, true)
 }
 
 function updateManualSceneDuration(event: Event) {
@@ -242,8 +283,15 @@ onBeforeUnmount(() => window.clearTimeout(previewTimer))
 
         <section class="inspector-section">
           <header><strong>时间范围</strong><small>独立于动画</small></header>
-          <label class="field-row"><span>开始时间</span><input type="number" min="0" :max="editorStore.currentScene.value.duration" step="0.05" :value="selected.start" @change="updateNumber('start', eventValue($event))" /></label>
-          <label class="field-row"><span>显示时长</span><input type="number" min="0.1" :max="editorStore.currentScene.value.duration - selected.start" step="0.05" :value="selected.duration" @change="updateNumber('duration', eventValue($event))" /></label>
+          <label class="field-row"><span>开始时间</span><input type="number" min="0" :max="selectedStartMax" step="0.05" :value="selected.start" @change="updateNumber('start', eventValue($event))" /></label>
+          <div class="field-row duration-field-row">
+            <span>显示时长</span>
+            <div class="duration-field-control">
+              <input type="number" min="0.1" :max="selectedDurationMax" step="0.05" :value="selected.duration" @change="updateNumber('duration', eventValue($event))" />
+              <button type="button" :disabled="!canExtendToLast" :title="canExtendToLast ? `延长到最晚元素结束，时长 ${durationToLast.toFixed(2)} 秒` : '当前元素已经播放到最后'" @click="extendSelectedToLast">到最后 {{ durationToLast.toFixed(2) }}s</button>
+            </div>
+          </div>
+          <p class="field-help">自动场景时长开启时，可直接输入超过当前场景长度的时长，场景会随之延长。</p>
         </section>
 
         <section v-if="selected.type === 'shape'" class="inspector-section">
