@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import {
   AlignHorizontalJustifyCenter,
   ChevronDown,
@@ -19,22 +20,22 @@ import TimelinePanel from '@/components/TimelinePanel.vue'
 import ExportDialog from '@/components/ExportDialog.vue'
 import SettingsDialog from '@/components/SettingsDialog.vue'
 import UploadDialog from '@/components/UploadDialog.vue'
-import AssetManagerPage from '@/components/AssetManagerPage.vue'
 import { editorStore } from '@/store/editorStore'
+import { workspaceTime } from '@/state/workspaceState'
 import { ExportEngine } from '@/engine/ExportEngine'
 import type { ExportProgress, Project } from '@/types/editor'
 import { downloadBlob } from '@/utils/helpers'
 import { alignSelected, changeCanvasRatio, type AlignMode } from '@/utils/editorCommands'
 
+const router = useRouter()
 const canvas = ref<InstanceType<typeof CanvasEditor> | null>(null)
-const currentTime = ref(0)
+const currentTime = workspaceTime
 const playing = ref(false)
 const loop = ref(false)
 const zoom = ref(1)
 const projectInput = ref<HTMLInputElement | null>(null)
 const settingsOpen = ref(false)
 const uploadOpen = ref(false)
-const assetManagerOpen = ref(false)
 const alignMenuOpen = ref(false)
 const timelineHeight = ref(300)
 const exportSupported = ref<boolean | null>(null)
@@ -146,7 +147,7 @@ function openUploadSettings() {
 
 function openAssetManager() {
   canvas.value?.pause()
-  assetManagerOpen.value = true
+  void router.push('/assets')
 }
 
 function startTimelineResize(event: PointerEvent) {
@@ -175,7 +176,7 @@ function stopTimelineResize(event?: PointerEvent) {
 }
 
 function keyboard(event: KeyboardEvent) {
-  if (assetManagerOpen.value || uploadOpen.value || settingsOpen.value || exportProgress.active) return
+  if (uploadOpen.value || settingsOpen.value || exportProgress.active) return
   const target = event.target as HTMLElement | null
   if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return
   if (event.code === 'Space') {
@@ -249,7 +250,7 @@ onUnmounted(() => {
 
     <section class="workspace capcut-workspace">
       <LeftPanel :current-time="currentTime" @upload="uploadOpen = true" />
-      <section class="canvas-column"><CanvasEditor ref="canvas" :zoom="zoom" @time="currentTime = $event" @playing="playing = $event" /></section>
+      <section class="canvas-column"><CanvasEditor ref="canvas" :zoom="zoom" :initial-time="currentTime" @time="currentTime = $event" @playing="playing = $event" /></section>
       <InspectorPanel @live="syncSelected" @preview="preview" />
     </section>
 
@@ -260,6 +261,5 @@ onUnmounted(() => {
     <ExportDialog :progress="exportProgress" @close="closeExport" />
     <SettingsDialog :open="settingsOpen" @close="settingsOpen = false" />
     <UploadDialog :open="uploadOpen" @close="uploadOpen = false" @settings="openUploadSettings" />
-    <AssetManagerPage v-if="assetManagerOpen" :current-time="currentTime" @back="assetManagerOpen = false" @upload="uploadOpen = true" @settings="settingsOpen = true" />
   </main>
 </template>

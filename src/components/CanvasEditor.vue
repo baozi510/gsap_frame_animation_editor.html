@@ -4,7 +4,7 @@ import { editorStore } from '@/store/editorStore'
 import { PixiEditorRenderer } from '@/engine/PixiEditorRenderer'
 import { TimelineEngine } from '@/engine/TimelineEngine'
 
-const props = defineProps<{ zoom: number }>()
+const props = withDefaults(defineProps<{ zoom: number; initialTime?: number }>(), { initialTime: 0 })
 const emit = defineEmits<{
   ready: []
   time: [value: number]
@@ -42,6 +42,12 @@ function rememberCurrentElements() {
   knownElementIds = new Set(editorStore.currentScene.value.elements.map((element) => element.id))
 }
 
+function visibleSeekTime(time: number) {
+  const duration = editorStore.currentScene.value.duration
+  const clamped = Math.min(Math.max(0, Number(time || 0)), duration)
+  return clamped <= 0 ? Math.min(duration, 0.000001) : Math.min(duration, clamped + 0.000001)
+}
+
 async function initialize() {
   if (!host.value) return
   renderer = new PixiEditorRenderer(editorStore.project, () => editorStore.currentScene.value, () => editorStore.selectedId.value)
@@ -65,6 +71,7 @@ async function initialize() {
   timeline.onTimeChange = (value) => emit('time', value)
   timeline.onPlayingChange = (value) => emit('playing', value)
   timeline.compile(editorStore.currentScene.value, false)
+  timeline.seek(visibleSeekTime(props.initialTime))
   rememberCurrentElements()
   ready.value = true
   emit('ready')
@@ -87,7 +94,7 @@ function syncSelected() {
   timeline.compile(editorStore.currentScene.value, true)
 }
 
-function seek(time: number) { timeline?.seek(time) }
+function seek(time: number) { timeline?.seek(time <= 0 ? visibleSeekTime(time) : time) }
 function play() { timeline?.play() }
 function pause() { timeline?.pause() }
 function toggle() { timeline?.toggle() }
@@ -103,10 +110,18 @@ watch(() => editorStore.revision.value, async () => {
   const selected = editorStore.selectedElement.value
   const newlyAdded = scene.id === knownSceneId && Boolean(selected && !knownElementIds.has(selected.id))
   await refreshAll(true)
-  if (newlyAdded && selected) timeline?.seek(selected.start)
+  if (newlyAdded && selected) timeline?.seek(visibleSeekTime(selected.start))
   rememberCurrentElements()
 })
-watch(() => editorStore.selectedId.value, () => renderer?.updateSelection())
+
+watch(() => editorStore.selectedId.value, () => {
+  const selected = editorStore.selectedElement.value
+  if (selected && timeline) {
+    const end = selected.start + selected.duration
+    if (timeline.time < selected.start || timeline.time >= end) timeline.seek(visibleSeekTime(selected.start))
+  }
+  renderer?.updateSelection()
+})
 
 onMounted(() => {
   resizeObserver = new ResizeObserver(updateFitScale)

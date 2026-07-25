@@ -1,0 +1,39 @@
+.spacious-select-step {
+  gap: 20px;
+  padding-bottom: 24px;
+}
+
+.spacious-select-step .upload-target-card {
+  flex: none;
+}
+
+.auto-upload-zone {
+  min-height: 330px;
+  margin: 6px 18px 0;
+  flex: 1;
+  gap: 12px;
+  border-radius: 16px;
+  background: radial-gradient(circle at 50% 20%, #24203b 0%, #11141a 58%, #0d1015 100%);
+}
+
+.auto-upload-zone strong {
+  font-size: 18px;
+}
+
+.auto-upload-zone span {
+  font-size: 11px;
+  color: #a4aab5;
+}
+
+.auto-upload-zone em {
+  color: #6f7784;
+  font-size: 9px;
+  font-style: normal;
+}
+
+.asset-library-route {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: #0c0f14;
+}
