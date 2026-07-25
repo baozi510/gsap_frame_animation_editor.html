@@ -44,6 +44,7 @@ const emit = defineEmits<{
   settings: []
 }>()
 
+const configured = ref(Boolean(getAssetApiBase()))
 const folders = ref<FlatFolder[]>([])
 const assets = ref<ProjectAsset[]>([])
 const currentFolderId = ref<string | null>(null)
@@ -55,7 +56,6 @@ const query = ref('')
 const viewMode = ref<ViewMode>('grid')
 const assetFilter = ref<AssetFilter>('all')
 
-const configured = computed(() => Boolean(getAssetApiBase()))
 const currentFolder = computed(() => folders.value.find((folder) => folder.id === currentFolderId.value) ?? null)
 const currentChildren = computed(() => folders.value.filter((folder) => (folder.parentId ?? null) === currentFolderId.value))
 const normalizedQuery = computed(() => query.value.trim().toLocaleLowerCase())
@@ -68,12 +68,14 @@ const totalItems = computed(() => currentChildren.value.length + assets.value.le
 
 const breadcrumbs = computed(() => {
   const result: AssetFolder[] = []
-  let cursor = currentFolder.value
+  let cursor: AssetFolder | null = currentFolder.value
   const seen = new Set<string>()
   while (cursor && !seen.has(cursor.id)) {
-    seen.add(cursor.id)
-    result.unshift(cursor)
-    cursor = cursor.parentId ? folders.value.find((folder) => folder.id === cursor?.parentId) ?? null : null
+    const current = cursor
+    seen.add(current.id)
+    result.unshift(current)
+    const parentId = current.parentId ?? null
+    cursor = parentId ? folders.value.find((folder) => folder.id === parentId) ?? null : null
   }
   return result
 })
@@ -126,6 +128,12 @@ async function loadAssets() {
 }
 
 async function reloadAll() {
+  configured.value = Boolean(getAssetApiBase())
+  if (!configured.value) {
+    folders.value = []
+    assets.value = []
+    return
+  }
   await loadFolderTree()
   await loadAssets()
 }
@@ -204,13 +212,20 @@ function onLibraryChanged() {
   void reloadAll()
 }
 
+function onAssetSettingsChanged() {
+  currentFolderId.value = null
+  void reloadAll()
+}
+
 onMounted(() => {
   window.addEventListener('motionframe:asset-library-changed', onLibraryChanged)
+  window.addEventListener('motionframe:asset-settings', onAssetSettingsChanged)
   void reloadAll()
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('motionframe:asset-library-changed', onLibraryChanged)
+  window.removeEventListener('motionframe:asset-settings', onAssetSettingsChanged)
 })
 </script>
 
@@ -239,86 +254,38 @@ onBeforeUnmount(() => {
         <button class="asset-folder-tree-row root" :class="{ active: currentFolderId === null }" @click="openFolder(null)"><Home :size="15" /><span>全部素材</span></button>
         <div v-if="loadingFolders" class="asset-sidebar-loading">正在读取目录…</div>
         <div v-else class="asset-folder-tree">
-          <button
-            v-for="folder in folders"
-            :key="folder.id"
-            class="asset-folder-tree-row"
-            :class="{ active: folder.id === currentFolderId }"
-            :style="{ paddingLeft: folderIndent(folder) }"
-            @click="openFolder(folder.id)"
-          ><Folder :size="15" /><span>{{ folder.name }}</span></button>
+          <button v-for="folder in folders" :key="folder.id" class="asset-folder-tree-row" :class="{ active: folder.id === currentFolderId }" :style="{ paddingLeft: folderIndent(folder) }" @click="openFolder(folder.id)"><Folder :size="15" /><span>{{ folder.name }}</span></button>
         </div>
-        <div class="asset-sidebar-create">
-          <input v-model="newFolderName" :disabled="creatingFolder" placeholder="新建文件夹" @keyup.enter="createFolder" />
-          <button :disabled="!newFolderName.trim() || creatingFolder" title="在当前目录新建" @click="createFolder"><FolderPlus :size="15" /></button>
-        </div>
+        <div class="asset-sidebar-create"><input v-model="newFolderName" :disabled="creatingFolder" placeholder="新建文件夹" @keyup.enter="createFolder" /><button :disabled="!newFolderName.trim() || creatingFolder" title="在当前目录新建" @click="createFolder"><FolderPlus :size="15" /></button></div>
       </aside>
 
       <main class="asset-file-area">
         <div class="asset-file-toolbar">
           <nav class="asset-breadcrumbs" aria-label="当前位置">
             <button @click="openFolder(null)"><Home :size="14" />全部素材</button>
-            <template v-for="folder in breadcrumbs" :key="folder.id">
-              <ChevronRight :size="13" />
-              <button @click="openFolder(folder.id)">{{ folder.name }}</button>
-            </template>
+            <template v-for="folder in breadcrumbs" :key="folder.id"><ChevronRight :size="13" /><button @click="openFolder(folder.id)">{{ folder.name }}</button></template>
           </nav>
-          <div class="asset-file-toolbar-right">
-            <select v-model="assetFilter">
-              <option value="all">全部类型</option>
-              <option value="image">图片</option>
-              <option value="video">视频</option>
-            </select>
-            <div class="asset-view-switch">
-              <button :class="{ active: viewMode === 'grid' }" title="网格视图" @click="viewMode = 'grid'"><Grid2X2 :size="15" /></button>
-              <button :class="{ active: viewMode === 'list' }" title="列表视图" @click="viewMode = 'list'"><List :size="15" /></button>
-            </div>
-          </div>
+          <div class="asset-file-toolbar-right"><select v-model="assetFilter"><option value="all">全部类型</option><option value="image">图片</option><option value="video">视频</option></select><div class="asset-view-switch"><button :class="{ active: viewMode === 'grid' }" title="网格视图" @click="viewMode = 'grid'"><Grid2X2 :size="15" /></button><button :class="{ active: viewMode === 'list' }" title="列表视图" @click="viewMode = 'list'"><List :size="15" /></button></div></div>
         </div>
 
-        <div class="asset-file-summary">
-          <span>{{ currentFolder?.name ?? '全部素材' }}</span>
-          <small>{{ totalItems }} 项</small>
-        </div>
+        <div class="asset-file-summary"><span>{{ currentFolder?.name ?? '全部素材' }}</span><small>{{ totalItems }} 项</small></div>
 
         <div v-if="loadingAssets" class="asset-manager-empty">正在读取素材…</div>
-        <div v-else-if="!filteredFolders.length && !filteredAssets.length" class="asset-manager-empty detailed">
-          <Folder :size="34" />
-          <strong>{{ query ? '没有匹配的文件' : '当前目录为空' }}</strong>
-          <span>{{ query ? '尝试更换搜索关键词或类型筛选。' : '可以新建目录，或上传图片和视频。' }}</span>
-          <button v-if="!query" @click="emit('upload')"><Upload :size="15" />上传素材</button>
-        </div>
+        <div v-else-if="!filteredFolders.length && !filteredAssets.length" class="asset-manager-empty detailed"><Folder :size="34" /><strong>{{ query ? '没有匹配的文件' : '当前目录为空' }}</strong><span>{{ query ? '尝试更换搜索关键词或类型筛选。' : '可以新建目录，或上传图片和视频。' }}</span><button v-if="!query" @click="emit('upload')"><Upload :size="15" />上传素材</button></div>
 
         <div v-else-if="viewMode === 'grid'" class="asset-manager-grid">
-          <button v-for="folder in filteredFolders" :key="folder.id" class="asset-folder-card" @click="openFolder(folder.id)">
-            <Folder :size="38" />
-            <strong>{{ folder.name }}</strong>
-            <small>文件夹</small>
-          </button>
-
+          <button v-for="folder in filteredFolders" :key="folder.id" class="asset-folder-card" @click="openFolder(folder.id)"><Folder :size="38" /><strong>{{ folder.name }}</strong><small>文件夹</small></button>
           <article v-for="asset in filteredAssets" :key="asset.id" class="asset-manager-card">
-            <div class="asset-manager-thumb">
-              <img v-if="asset.type === 'image' && (asset.thumbnailUrl || asset.downloadUrl)" :src="asset.thumbnailUrl || asset.downloadUrl" :alt="asset.name" />
-              <Clapperboard v-else :size="34" />
-            </div>
+            <div class="asset-manager-thumb"><img v-if="asset.type === 'image' && (asset.thumbnailUrl || asset.downloadUrl)" :src="asset.thumbnailUrl || asset.downloadUrl" :alt="asset.name" /><Clapperboard v-else :size="34" /></div>
             <div class="asset-manager-card-copy"><strong :title="asset.name">{{ asset.name }}</strong><small>{{ asset.type === 'video' ? `${asset.duration?.toFixed(1) ?? '--'}s` : `${asset.width || '--'} × ${asset.height || '--'}` }} · {{ formatBytes(asset.size) }}</small></div>
-            <div class="asset-manager-card-actions">
-              <button title="加入当前场景" @click="addToScene(asset)"><Plus :size="14" />加入</button>
-              <button class="danger" title="删除素材" @click="removeAsset(asset)"><Trash2 :size="14" /></button>
-            </div>
+            <div class="asset-manager-card-actions"><button title="加入当前场景" @click="addToScene(asset)"><Plus :size="14" />加入</button><button class="danger" title="删除素材" @click="removeAsset(asset)"><Trash2 :size="14" /></button></div>
           </article>
         </div>
 
         <div v-else class="asset-manager-list">
           <div class="asset-list-head"><span>名称</span><span>类型</span><span>大小</span><span>创建时间</span><span>操作</span></div>
           <button v-for="folder in filteredFolders" :key="folder.id" class="asset-list-row folder" @click="openFolder(folder.id)"><span><Folder :size="17" />{{ folder.name }}</span><span>文件夹</span><span>--</span><span>{{ formatDate(folder.createdAt) }}</span><span>打开</span></button>
-          <div v-for="asset in filteredAssets" :key="asset.id" class="asset-list-row asset">
-            <span><ImageIcon v-if="asset.type === 'image'" :size="17" /><Clapperboard v-else :size="17" /><strong :title="asset.name">{{ asset.name }}</strong></span>
-            <span>{{ asset.type === 'image' ? '图片' : '视频' }}</span>
-            <span>{{ formatBytes(asset.size) }}</span>
-            <span>{{ formatDate(asset.createdAt) }}</span>
-            <span class="asset-list-actions"><button @click="addToScene(asset)">加入</button><button class="danger" @click="removeAsset(asset)"><Trash2 :size="14" /></button></span>
-          </div>
+          <div v-for="asset in filteredAssets" :key="asset.id" class="asset-list-row asset"><span><ImageIcon v-if="asset.type === 'image'" :size="17" /><Clapperboard v-else :size="17" /><strong :title="asset.name">{{ asset.name }}</strong></span><span>{{ asset.type === 'image' ? '图片' : '视频' }}</span><span>{{ formatBytes(asset.size) }}</span><span>{{ formatDate(asset.createdAt) }}</span><span class="asset-list-actions"><button @click="addToScene(asset)">加入</button><button class="danger" @click="removeAsset(asset)"><Trash2 :size="14" /></button></span></div>
         </div>
       </main>
     </div>
