@@ -33,6 +33,7 @@ export function moveSelectedLayer(direction: 'up' | 'down' | 'top' | 'bottom') {
     const [element] = ordered.splice(index, 1)
     ordered.splice(target, 0, element)
     ordered.forEach((item, order) => { item.z = order + 1 })
+    editorStore.currentScene.value.elements.splice(0, editorStore.currentScene.value.elements.length, ...ordered)
   }, '元素层级已调整')
 }
 
@@ -40,20 +41,24 @@ export type LayerDropPosition = 'before' | 'after'
 
 export function reorderLayer(draggedId: string, targetId: string, position: LayerDropPosition = 'before') {
   if (draggedId === targetId) return
+  const scene = editorStore.currentScene.value
+  const frontToBack = [...scene.elements].sort((a, b) => b.z - a.z)
+  const from = frontToBack.findIndex((item) => item.id === draggedId)
+  if (from < 0) return
+
+  const [moved] = frontToBack.splice(from, 1)
+  const targetIndex = frontToBack.findIndex((item) => item.id === targetId)
+  if (targetIndex < 0) return
+  const insertIndex = targetIndex + (position === 'after' ? 1 : 0)
+  frontToBack.splice(insertIndex, 0, moved)
+
+  const backToFront = [...frontToBack].reverse()
+  const unchanged = backToFront.every((item, index) => scene.elements[index]?.id === item.id)
+  if (unchanged) return
+
   editorStore.commit(() => {
-    const scene = editorStore.currentScene.value
-    const displayOrder = [...scene.elements].sort((a, b) => b.z - a.z)
-    const from = displayOrder.findIndex((item) => item.id === draggedId)
-    if (from < 0) return
-
-    const [moved] = displayOrder.splice(from, 1)
-    const targetIndex = displayOrder.findIndex((item) => item.id === targetId)
-    if (targetIndex < 0) return
-    const insertIndex = targetIndex + (position === 'after' ? 1 : 0)
-    displayOrder.splice(insertIndex, 0, moved)
-
-    displayOrder.forEach((item, index) => { item.z = displayOrder.length - index })
-    scene.elements = [...displayOrder].sort((a, b) => a.z - b.z)
+    backToFront.forEach((item, index) => { item.z = index + 1 })
+    scene.elements.splice(0, scene.elements.length, ...backToFront)
   }, '图层顺序已调整')
 }
 
@@ -215,9 +220,12 @@ export function addRemoteAssetToScene(asset: ProjectAsset, atTime = 0) {
 }
 
 export function getElementMaxDuration(element: EditorElement, scene: Scene) {
-  if (element.type !== 'video' || !element.assetId) return Math.max(0.1, scene.duration - element.start)
+  const manualLimit = Math.max(0.1, scene.duration - element.start)
+  const timelineLimit = scene.autoDuration === false ? manualLimit : 600
+  if (element.type !== 'video' || !element.assetId) return timelineLimit
   const asset = editorStore.project.assets.find((item) => item.id === element.assetId)
-  return Math.max(0.1, Math.min(asset?.duration ?? scene.duration, scene.duration - element.start))
+  const sourceDuration = Math.max(0.1, asset?.duration ?? timelineLimit)
+  return scene.autoDuration === false ? Math.max(0.1, Math.min(sourceDuration, manualLimit)) : sourceDuration
 }
 
 export function getProjectDuration() {

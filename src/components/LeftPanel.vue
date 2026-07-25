@@ -22,6 +22,15 @@ import {
   type LayerDropPosition,
 } from '@/utils/editorCommands'
 
+interface LayerPointerDrag {
+  sourceId: string
+  targetId: string
+  position: LayerDropPosition
+  pointerId: number
+  startY: number
+  moved: boolean
+}
+
 const props = defineProps<{ currentTime: number }>()
 const tab = ref<'assets' | 'scenes' | 'layers'>('assets')
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -36,6 +45,7 @@ const cachedMap = ref<Record<string, boolean>>({})
 const draggedLayerId = ref<string | null>(null)
 const dragOverLayerId = ref<string | null>(null)
 const dragOverPosition = ref<LayerDropPosition>('before')
+let layerPointerDrag: LayerPointerDrag | null = null
 
 const currentFolder = computed(() => folders.value.find((folder) => folder.id === currentFolderId.value) ?? null)
 const totalDuration = computed(() => getProjectDuration())
@@ -123,37 +133,68 @@ function addAsset(asset: ProjectAsset) {
   addRemoteAssetToScene(asset, props.currentTime)
 }
 
-function startLayerDrag(id: string, event: DragEvent) {
+function startLayerPointer(id: string, event: PointerEvent) {
+  if (event.button !== 0) return
+  const target = event.target as HTMLElement
+  if (target.closest('.layer-row-actions')) return
+  event.preventDefault()
+  editorStore.select(id)
+  layerPointerDrag = {
+    sourceId: id,
+    targetId: id,
+    position: 'before',
+    pointerId: event.pointerId,
+    startY: event.clientY,
+    moved: false,
+  }
   draggedLayerId.value = id
   dragOverLayerId.value = id
   dragOverPosition.value = 'before'
-  editorStore.select(id)
-  if (event.dataTransfer) {
-    event.dataTransfer.effectAllowed = 'move'
-    event.dataTransfer.setData('text/plain', id)
-  }
+  document.body.classList.add('layer-reordering')
+  window.addEventListener('pointermove', moveLayerPointer)
+  window.addEventListener('pointerup', finishLayerPointer)
+  window.addEventListener('pointercancel', cancelLayerPointer)
 }
 
-function dragOverLayer(id: string, event: DragEvent) {
+function moveLayerPointer(event: PointerEvent) {
+  const drag = layerPointerDrag
+  if (!drag || drag.pointerId !== event.pointerId) return
+  if (!drag.moved && Math.abs(event.clientY - drag.startY) < 4) return
+  drag.moved = true
   event.preventDefault()
-  const row = event.currentTarget as HTMLElement
+
+  const row = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>('[data-layer-id]')
+  const targetId = row?.dataset.layerId
+  if (!row || !targetId) return
   const rect = row.getBoundingClientRect()
-  dragOverLayerId.value = id
-  dragOverPosition.value = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
-  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+  drag.targetId = targetId
+  drag.position = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
+  dragOverLayerId.value = targetId
+  dragOverPosition.value = drag.position
 }
 
-function dropLayer(targetId: string, event: DragEvent) {
-  event.preventDefault()
-  const sourceId = draggedLayerId.value || event.dataTransfer?.getData('text/plain') || null
-  if (sourceId && sourceId !== targetId) reorderLayer(sourceId, targetId, dragOverPosition.value)
-  finishLayerDrag()
-}
-
-function finishLayerDrag() {
+function cleanupLayerPointer() {
+  layerPointerDrag = null
   draggedLayerId.value = null
   dragOverLayerId.value = null
   dragOverPosition.value = 'before'
+  document.body.classList.remove('layer-reordering')
+  window.removeEventListener('pointermove', moveLayerPointer)
+  window.removeEventListener('pointerup', finishLayerPointer)
+  window.removeEventListener('pointercancel', cancelLayerPointer)
+}
+
+function finishLayerPointer(event: PointerEvent) {
+  const drag = layerPointerDrag
+  if (!drag || drag.pointerId !== event.pointerId) return
+  if (drag.moved && drag.sourceId !== drag.targetId) {
+    reorderLayer(drag.sourceId, drag.targetId, drag.position)
+  }
+  cleanupLayerPointer()
+}
+
+function cancelLayerPointer() {
+  cleanupLayerPointer()
 }
 
 function selectLayer(id: string) {
@@ -170,7 +211,10 @@ onMounted(() => {
   if (apiConfigured.value) void loadLibrary()
 })
 
-onBeforeUnmount(() => window.removeEventListener('motionframe:asset-settings', onAssetSettingsChanged))
+onBeforeUnmount(() => {
+  window.removeEventListener('motionframe:asset-settings', onAssetSettingsChanged)
+  cleanupLayerPointer()
+})
 </script>
 
 <template>
@@ -265,10 +309,11 @@ onBeforeUnmount(() => window.removeEventListener('motionframe:asset-settings', o
     </div>
 
     <div v-else class="panel-scroll layer-panel">
-      <div class="layer-drag-tip">按住图层名称拖动排序，列表越靠上，画布层级越高。</div>
+      <div class="layer-drag-tip">按住图层名称上下拖动，松开后立即改变画布层级。</div>
       <div
         v-for="element in orderedLayers"
         :key="element.id"
+        :data-layer-id="element.id"
         class="layer-row layer-row-v5"
         :class="{
           active: element.id === editorStore.selectedId.value,
@@ -276,15 +321,10 @@ onBeforeUnmount(() => window.removeEventListener('motionframe:asset-settings', o
           'drop-before': element.id === dragOverLayerId && element.id !== draggedLayerId && dragOverPosition === 'before',
           'drop-after': element.id === dragOverLayerId && element.id !== draggedLayerId && dragOverPosition === 'after',
         }"
-        draggable="true"
         role="button"
         tabindex="0"
         :aria-label="`图层 ${element.name}`"
-        @dragstart="startLayerDrag(element.id, $event)"
-        @dragenter.prevent="dragOverLayer(element.id, $event)"
-        @dragover="dragOverLayer(element.id, $event)"
-        @drop="dropLayer(element.id, $event)"
-        @dragend="finishLayerDrag"
+        @pointerdown="startLayerPointer(element.id, $event)"
         @click="selectLayer(element.id)"
         @keydown.enter="selectLayer(element.id)"
         @keydown.space.prevent="selectLayer(element.id)"
@@ -293,14 +333,12 @@ onBeforeUnmount(() => window.removeEventListener('motionframe:asset-settings', o
         <div class="layer-row-actions">
           <button
             type="button"
-            draggable="false"
             :title="element.visible ? '隐藏图层' : '显示图层'"
             :aria-label="element.visible ? '隐藏图层' : '显示图层'"
             @click.stop="editorStore.commit(() => element.visible = !element.visible)"
           ><Eye v-if="element.visible" :size="14" /><EyeOff v-else :size="14" /></button>
           <button
             type="button"
-            draggable="false"
             :title="element.locked ? '解锁图层' : '锁定图层'"
             :aria-label="element.locked ? '解锁图层' : '锁定图层'"
             @click.stop="editorStore.commit(() => element.locked = !element.locked)"
