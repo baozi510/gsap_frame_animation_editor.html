@@ -1,5 +1,6 @@
 import { createApp } from 'vue'
-import App from './App.vue'
+import RootApp from './RootApp.vue'
+import { router } from './router'
 import './styles.css'
 import './timeline-enhancements.css'
 import './asset-timeline.css'
@@ -11,4 +12,4 @@ import './capcut-layout.css'
 import './upload-dialog.css'
 import './asset-manager.css'
 
-createApp(App).mount('#app')
+createApp(RootApp).use(router).mount('#app')
