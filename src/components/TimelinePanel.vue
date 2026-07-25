@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { editorStore } from '@/store/editorStore'
 import { clamp } from '@/utils/helpers'
 import { getElementMaxDuration, refreshSceneDuration } from '@/utils/editorCommands'
+import { clampMotionClips, getMotionClips } from '@/utils/motionClips'
 import type { EditorElement } from '@/types/editor'
 
 const props = defineProps<{ currentTime: number; playing: boolean; loop: boolean }>()
@@ -68,6 +69,13 @@ function animationStyle(elementStart: number, offset: number, duration: number) 
   return clipStyle(elementStart + offset, duration)
 }
 
+function motionStyle(elementStart: number, offset: number, duration: number, index: number) {
+  return {
+    ...animationStyle(elementStart, offset, duration),
+    top: `${2 + (index % 3) * 5}px`,
+  }
+}
+
 function seekFromPointer(event: PointerEvent) {
   const surface = event.currentTarget as HTMLElement
   const rect = surface.getBoundingClientRect()
@@ -80,6 +88,7 @@ function clampAnimations(element: EditorElement) {
     clip.duration = clamp(clip.duration, 0.05, element.duration)
     clip.offset = clamp(clip.offset, 0, Math.max(0, element.duration - clip.duration))
   })
+  clampMotionClips(element)
 }
 
 function startPointer(event: PointerEvent) {
@@ -134,7 +143,10 @@ function movePointer(event: PointerEvent) {
   const delta = (event.clientX - drag.startClientX) / Math.max(1, pixelsPerSecond.value)
 
   if (drag.mode === 'move') {
-    element.start = clamp(originalStart + delta, 0, Math.max(0, scene.value.duration - originalDuration))
+    const maxStart = scene.value.autoDuration === false
+      ? Math.max(0, scene.value.duration - originalDuration)
+      : 600
+    element.start = clamp(originalStart + delta, 0, maxStart)
   } else if (drag.mode === 'resize-start') {
     const originalEnd = originalStart + originalDuration
     let nextStart = clamp(originalStart + delta, 0, originalEnd - 0.1)
@@ -147,7 +159,8 @@ function movePointer(event: PointerEvent) {
       nextStart = originalEnd - nextDuration
     }
     element.start = nextStart
-    element.duration = clamp(nextDuration, 0.1, scene.value.duration - nextStart)
+    const maxDuration = getElementMaxDuration(element, scene.value)
+    element.duration = clamp(nextDuration, 0.1, maxDuration)
     clampAnimations(element)
   } else {
     const maxDuration = getElementMaxDuration(element, scene.value)
@@ -200,9 +213,10 @@ onBeforeUnmount(() => resizeObserver?.disconnect())
       <strong>{{ currentTime.toFixed(2) }}s</strong>
       <span>/ {{ scene.duration.toFixed(2) }}s</span>
       <div class="timeline-spacer" />
-      <span class="timeline-hint">拖动片段移动 · 拖左右边缘调整时长</span>
+      <span class="timeline-hint">元素片段可拖动 · 普通动画可接续或并列</span>
       <div class="timeline-legend">
         <span><i class="enter" />进场</span>
+        <span><i class="motion" />普通</span>
         <span><i class="hold" />强调</span>
         <span><i class="exit" />退场</span>
       </div>
@@ -244,6 +258,14 @@ onBeforeUnmount(() => resizeObserver?.disconnect())
               <i class="span-handle end" data-side="end" />
             </div>
             <div v-for="clip in element.animations" :key="clip.id" class="animation-overlay" :class="clip.phase" :style="animationStyle(element.start, clip.offset, clip.duration)" :title="`${phaseLabel(clip.phase)} · ${clip.preset} · ${clip.duration.toFixed(2)}s`" />
+            <div
+              v-for="(clip, index) in getMotionClips(element)"
+              :key="clip.id"
+              class="motion-animation-overlay"
+              :class="clip.relation ?? 'free'"
+              :style="motionStyle(element.start, clip.offset, clip.duration, index)"
+              :title="`普通动画 · ${clip.name} · ${clip.relation === 'chain' ? '接续' : clip.relation === 'parallel' ? '并列' : '自由'} · ${clip.duration.toFixed(2)}s`"
+            />
           </div>
 
           <div class="playhead" :style="{ left: playheadLeft }"><i /></div>
