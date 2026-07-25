@@ -3,7 +3,6 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { editorStore } from '@/store/editorStore'
 import { PixiEditorRenderer } from '@/engine/PixiEditorRenderer'
 import { TimelineEngine } from '@/engine/TimelineEngine'
-import type { AnimationPhase } from '@/types/editor'
 
 const props = defineProps<{ zoom: number }>()
 const emit = defineEmits<{
@@ -92,9 +91,9 @@ function seek(time: number) { timeline?.seek(time) }
 function play() { timeline?.play() }
 function pause() { timeline?.pause() }
 function toggle() { timeline?.toggle() }
-function previewSegment(phase: AnimationPhase) {
+function previewAnimation(animationId: string) {
   const element = editorStore.selectedElement.value
-  if (element) timeline?.previewSegment(element, phase)
+  if (element) timeline?.previewAnimation(element, animationId)
 }
 function setLoop(value: boolean) { if (timeline) timeline.loop = value }
 
@@ -121,7 +120,7 @@ onBeforeUnmount(() => {
   renderer?.destroy()
 })
 
-defineExpose({ refreshAll, syncSelected, seek, play, pause, toggle, previewSegment, setLoop })
+defineExpose({ refreshAll, syncSelected, seek, play, pause, toggle, previewAnimation, setLoop })
 </script>
 
 <template>

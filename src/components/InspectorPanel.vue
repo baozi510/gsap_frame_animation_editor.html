@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
 import { editorStore } from '@/store/editorStore'
+import MotionAnimationEditor from '@/components/MotionAnimationEditor.vue'
 import type { AnimationClip, AnimationPhase, EditorElement } from '@/types/editor'
 import { clamp, uid } from '@/utils/helpers'
+import { clampMotionClips } from '@/utils/motionClips'
 import {
   getElementMaxDuration,
   getSceneContentEnd,
@@ -13,10 +15,10 @@ import {
 
 const emit = defineEmits<{
   live: []
-  preview: [phase: AnimationPhase]
+  preview: [animationId: string]
 }>()
 
-const tab = ref<'element' | 'animation' | 'scene'>('element')
+const tab = ref<'element' | 'motion' | 'animation' | 'scene'>('element')
 const animationPhase = ref<AnimationPhase>('enter')
 const animationPhases: AnimationPhase[] = ['enter', 'hold', 'exit']
 let previewTimer = 0
@@ -82,7 +84,7 @@ function queuePreview(delay = 140) {
   window.clearTimeout(previewTimer)
   previewTimer = window.setTimeout(() => {
     if (!selectedClip.value) return
-    emit('preview', animationPhase.value)
+    emit('preview', selectedClip.value.id)
   }, delay)
 }
 
@@ -104,6 +106,7 @@ function clampElementAnimations(element: EditorElement) {
     clip.duration = clamp(clip.duration, 0.05, element.duration)
     clip.offset = clamp(clip.offset, 0, Math.max(0, element.duration - clip.duration))
   })
+  clampMotionClips(element)
 }
 
 function updateNumber(key: 'x' | 'y' | 'width' | 'height' | 'rotation' | 'alpha' | 'start' | 'duration', value: string) {
@@ -235,9 +238,10 @@ onBeforeUnmount(() => window.clearTimeout(previewTimer))
 
 <template>
   <aside class="right-panel panel">
-    <div class="panel-tabs">
+    <div class="panel-tabs inspector-main-tabs">
       <button :class="{ active: tab === 'element' }" @click="tab = 'element'">元素</button>
-      <button :class="{ active: tab === 'animation' }" @click="tab = 'animation'">动画</button>
+      <button :class="{ active: tab === 'motion' }" @click="tab = 'motion'">普通</button>
+      <button :class="{ active: tab === 'animation' }" @click="tab = 'animation'">特效</button>
       <button :class="{ active: tab === 'scene' }" @click="tab = 'scene'">场景</button>
     </div>
 
@@ -313,6 +317,8 @@ onBeforeUnmount(() => window.clearTimeout(previewTimer))
         </section>
       </template>
 
+      <MotionAnimationEditor v-else-if="tab === 'motion'" @preview="emit('preview', $event)" />
+
       <template v-else>
         <div class="animation-phase-tabs">
           <button
@@ -332,7 +338,7 @@ onBeforeUnmount(() => window.clearTimeout(previewTimer))
         <section v-else class="inspector-section animation-section">
           <header>
             <strong>{{ phaseLabel(animationPhase) }}动画</strong>
-            <button class="preview-link" @click="emit('preview', animationPhase)">循环预览</button>
+            <button class="preview-link" @click="emit('preview', selectedClip.id)">循环预览</button>
           </header>
           <div class="preset-grid">
             <button

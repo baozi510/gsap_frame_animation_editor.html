@@ -25,7 +25,7 @@ import ExportDialog from '@/components/ExportDialog.vue'
 import SettingsDialog from '@/components/SettingsDialog.vue'
 import { editorStore } from '@/store/editorStore'
 import { ExportEngine } from '@/engine/ExportEngine'
-import type { AnimationPhase, ExportProgress, Project } from '@/types/editor'
+import type { ExportProgress, Project } from '@/types/editor'
 import { downloadBlob } from '@/utils/helpers'
 import { alignSelected, changeCanvasRatio, clearCurrentScene } from '@/utils/editorCommands'
 
@@ -70,8 +70,8 @@ function syncSelected() {
   canvas.value?.syncSelected()
 }
 
-function preview(phase: AnimationPhase) {
-  canvas.value?.previewSegment(phase)
+function preview(animationId: string) {
+  canvas.value?.previewAnimation(animationId)
 }
 
 function saveProjectFile() {

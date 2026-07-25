@@ -6,5 +6,6 @@ import './asset-timeline.css'
 import './editor-workflow.css'
 import './workflow-v4.css'
 import './workflow-v5.css'
+import './motion-animations.css'
 
 createApp(App).mount('#app')
